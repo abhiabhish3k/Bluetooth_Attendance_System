@@ -1,0 +1,109 @@
+"""
+FastAPI Application Entry Point for BLE Attendance System.
+"""
+
+import logging
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+
+from .config import settings
+from .models.student import Base as StudentBase
+from .models.session import Base as SessionBase  # noqa: F401 – same Base via inheritance
+from .models.attendance import AttendanceORM, ScanLogORM  # noqa: F401 – register models
+
+# Configure logging
+logging.basicConfig(
+    level=getattr(logging, settings.log_level.upper(), logging.INFO),
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Database setup
+# ---------------------------------------------------------------------------
+engine = create_async_engine(
+    settings.database_url,
+    echo=settings.debug,
+    future=True,
+)
+
+async_session_maker = async_sessionmaker(
+    engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+)
+
+
+# ---------------------------------------------------------------------------
+# Application lifespan
+# ---------------------------------------------------------------------------
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: create all tables
+    async with engine.begin() as conn:
+        await conn.run_sync(StudentBase.metadata.create_all)
+    logger.info("Database tables ensured")
+    yield
+    # Shutdown: dispose engine
+    await engine.dispose()
+    logger.info("Database engine disposed")
+
+
+# ---------------------------------------------------------------------------
+# FastAPI app
+# ---------------------------------------------------------------------------
+app = FastAPI(
+    title=settings.app_name,
+    version=settings.app_version,
+    description=(
+        "REST API for the Bluetooth Attendance System. "
+        "Receives BLE scan events from the C++ scanner and manages student attendance."
+    ),
+    lifespan=lifespan,
+)
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ---------------------------------------------------------------------------
+# Routers
+# ---------------------------------------------------------------------------
+from .api.scanner import router as scanner_router
+from .api.attendance import router as attendance_router
+from .api.students import router as students_router
+from .api.sessions import router as sessions_router
+
+app.include_router(scanner_router)
+app.include_router(attendance_router)
+app.include_router(students_router)
+app.include_router(sessions_router)
+
+
+# ---------------------------------------------------------------------------
+# Health check
+# ---------------------------------------------------------------------------
+@app.get("/health", tags=["system"])
+async def health_check():
+    return {
+        "status": "ok",
+        "app": settings.app_name,
+        "version": settings.app_version,
+    }
+
+
+@app.get("/", tags=["system"])
+async def root():
+    return {
+        "message": "BLE Attendance System API",
+        "docs": "/docs",
+        "health": "/health",
+    }

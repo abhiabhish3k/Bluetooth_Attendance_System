@@ -1,0 +1,17 @@
+{
+  "description": "Timing configuration for attendance detection behaviour.",
+  "scanner": {
+    "dedup_window_seconds": 5,
+    "description": "Suppress duplicate events for the same MAC within this window."
+  },
+  "session": {
+    "grace_period_seconds": 300,
+    "description": "Scans arriving up to this many seconds after session end_time still count.",
+    "late_threshold_seconds": 900,
+    "description_late": "Students detected after this many seconds past start_time are marked late."
+  },
+  "purge": {
+    "deduplicator_purge_interval_seconds": 60,
+    "description": "How often to sweep expired entries from the deduplicator map."
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "adapter": "hci0",
+  "rssi_threshold": -80,
+  "dedup_window": 5,
+  "log_file": "scanner.log",
+  "log_level": "INFO"
+}
