@@ -43,8 +43,8 @@ class SessionCreate(BaseModel):
     @field_validator("threshold_rssi")
     @classmethod
     def validate_rssi(cls, v: int) -> int:
-        if v < -120 or v > 0:
-            raise ValueError("RSSI threshold must be between -120 and 0 dBm")
+        if v < -120 or v > 10:
+            raise ValueError("RSSI threshold must be between -120 and 10 dBm")
         return v
 
 

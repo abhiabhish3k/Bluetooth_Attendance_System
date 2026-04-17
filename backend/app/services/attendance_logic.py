@@ -185,7 +185,7 @@ async def _find_active_session(db: AsyncSession) -> Optional[SessionORM]:
         .where(
             and_(
                 SessionORM.start_time <= now,
-                (SessionORM.end_time == None) | (SessionORM.end_time >= now),  # noqa: E711
+                (SessionORM.end_time.is_(None)) | (SessionORM.end_time >= now),
             )
         )
         .order_by(SessionORM.start_time.desc())

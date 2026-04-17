@@ -82,6 +82,6 @@ async def receive_batch_events(
             results.append(result)
         except Exception as exc:
             logger.warning("Error processing event %s: %s", payload, exc)
-            results.append({"status": "error", "reason": str(exc)})
+            results.append({"status": "error", "reason": "processing_failed"})
 
     return {"processed": len(results), "results": results}

@@ -7,8 +7,10 @@
   "session": {
     "grace_period_seconds": 300,
     "description": "Scans arriving up to this many seconds after session end_time still count.",
-    "late_threshold_seconds": 900,
-    "description_late": "Students detected after this many seconds past start_time are marked late."
+    "late_threshold": {
+      "seconds": 900,
+      "description": "Students detected after this many seconds past start_time are marked late."
+    }
   },
   "purge": {
     "deduplicator_purge_interval_seconds": 60,
