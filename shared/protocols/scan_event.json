@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "BLE Scan Event",
+  "description": "A single BLE device detection event emitted by the C++ scanner.",
+  "type": "object",
+  "required": ["address", "rssi", "timestamp"],
+  "properties": {
+    "address": {
+      "type": "string",
+      "description": "IEEE 802 MAC address of the detected device (upper-case, colon-separated).",
+      "pattern": "^([0-9A-F]{2}:){5}[0-9A-F]{2}$",
+      "examples": ["AA:BB:CC:DD:EE:FF"]
+    },
+    "name": {
+      "type": "string",
+      "description": "Advertising name broadcast by the device (may be empty).",
+      "maxLength": 128,
+      "default": ""
+    },
+    "rssi": {
+      "type": "integer",
+      "description": "Received Signal Strength Indicator in dBm. More negative = weaker signal.",
+      "minimum": -120,
+      "maximum": 10,
+      "examples": [-60, -75, -85]
+    },
+    "timestamp": {
+      "type": "integer",
+      "description": "Unix timestamp (seconds since epoch) when the device was detected.",
+      "minimum": 1577836800,
+      "examples": [1712345678]
+    }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "address": "AA:BB:CC:DD:EE:FF",
+      "name": "Alice's iPhone",
+      "rssi": -62,
+      "timestamp": 1712345678
+    },
+    {
+      "address": "11:22:33:44:55:66",
+      "name": "",
+      "rssi": -80,
+      "timestamp": 1712345700
+    }
+  ]
+}

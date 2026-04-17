@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Attendance Event",
+  "description": "Attendance record created when a student is detected during a session.",
+  "type": "object",
+  "required": ["attendance_id", "student_id", "session_id", "detected_time", "rssi"],
+  "properties": {
+    "attendance_id": {
+      "type": "integer",
+      "description": "Unique identifier for this attendance record."
+    },
+    "student_id": {
+      "type": "integer",
+      "description": "ID of the student who was detected."
+    },
+    "session_id": {
+      "type": "integer",
+      "description": "ID of the class session."
+    },
+    "detected_time": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC timestamp of first detection."
+    },
+    "rssi": {
+      "type": "integer",
+      "description": "RSSI at time of detection (dBm).",
+      "minimum": -120,
+      "maximum": 10
+    }
+  }
+}

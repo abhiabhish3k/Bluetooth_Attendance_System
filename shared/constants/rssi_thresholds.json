@@ -1,0 +1,34 @@
+{
+  "description": "RSSI threshold configuration for BLE proximity detection.",
+  "thresholds": {
+    "very_close": {
+      "value": -55,
+      "description": "Device is within ~1 metre of the scanner."
+    },
+    "close": {
+      "value": -65,
+      "description": "Device is within ~3 metres of the scanner."
+    },
+    "medium": {
+      "value": -75,
+      "description": "Device is within ~5-7 metres. Default attendance threshold."
+    },
+    "far": {
+      "value": -85,
+      "description": "Device is within ~10 metres. Use for large classrooms."
+    },
+    "ignore": {
+      "value": -100,
+      "description": "Signals weaker than this are ignored entirely."
+    }
+  },
+  "defaults": {
+    "attendance": -75,
+    "scan_filter": -100
+  },
+  "notes": [
+    "RSSI is affected by walls, interference, and device hardware.",
+    "Calibrate by walking around the room with a phone and observing values.",
+    "Typical BLE phone at 5m in open space: -65 to -75 dBm."
+  ]
+}
