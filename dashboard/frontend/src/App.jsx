@@ -4,7 +4,7 @@
  * A minimal React dashboard for viewing attendance reports.
  * Connects to the FastAPI backend at http://localhost:8000.
  */
-
+import React from "react";
 import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 
