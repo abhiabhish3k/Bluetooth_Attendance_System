@@ -10,7 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   # BLE advertisement (iBeacon / Eddystone broadcast)
-  beacon_broadcast: ^0.4.1
+  beacon_broadcast: ^0.3.1
   # Persistent local storage for student configuration
   shared_preferences: ^2.2.2
   # Foreground service to keep beacon alive in background
