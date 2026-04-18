@@ -5,6 +5,10 @@ Database initialisation script.
 Creates all tables defined in schema.sql (SQLite) and optionally seeds
 some sample data for local development/testing.
 
+If an existing database is detected that pre-dates the Beacon UUID migration,
+the script automatically runs the migration (via migrate.py) before applying
+the full schema so that index creation never fails on missing columns.
+
 Usage:
     python database/init_db.py [--db path/to/db.sqlite] [--seed]
 """
@@ -15,12 +19,23 @@ import os
 import sys
 from pathlib import Path
 
+from migrate import run_migrations, needs_migration
+
 SCHEMA_FILE = Path(__file__).parent / "schema.sql"
 DEFAULT_DB  = Path(__file__).parent.parent / "backend" / "attendance.db"
 
 
 def create_tables(conn: sqlite3.Connection) -> None:
-    """Execute the full schema.sql against the given connection."""
+    """Execute the full schema.sql against the given connection.
+
+    If the database already has tables from the old MAC-address-only schema,
+    the migration is applied first so that all columns exist before the index
+    creation statements in schema.sql are executed.
+    """
+    if needs_migration(conn):
+        print("[init_db] Old schema detected – running migrations first …")
+        run_migrations(conn)
+
     schema = SCHEMA_FILE.read_text(encoding="utf-8")
     # SQLite's executescript does not support multiple statements from executemany;
     # split on semicolons and execute each statement individually.
