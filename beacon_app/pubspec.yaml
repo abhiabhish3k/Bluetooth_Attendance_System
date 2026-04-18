@@ -1,0 +1,26 @@
+name: ble_attendance_beacon
+description: Student BLE Beacon App for the Bluetooth Attendance System.
+publish_to: none
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # BLE advertisement (iBeacon / Eddystone broadcast)
+  beacon_broadcast: ^0.4.1
+  # Persistent local storage for student configuration
+  shared_preferences: ^2.2.2
+  # Foreground service to keep beacon alive in background
+  flutter_foreground_task: ^6.1.2
+  cupertino_icons: ^1.0.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true

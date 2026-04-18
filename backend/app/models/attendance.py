@@ -36,6 +36,7 @@ class ScanLogORM(Base):
     mac_address = Column(String(17), nullable=False, index=True)
     rssi = Column(Integer, nullable=False)
     device_name = Column(String(128), nullable=True)
+    beacon_id = Column(String(64), nullable=True, index=True)
     detected_time = Column(DateTime, nullable=False)
     session_id = Column(Integer, ForeignKey("sessions.session_id", ondelete="SET NULL"),
                         nullable=True, index=True)

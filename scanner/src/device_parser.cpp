@@ -1,5 +1,5 @@
 /**
- * Device Parser – MAC address and RSSI validation/parsing.
+ * Device Parser – MAC address/RSSI validation and beacon data parsing.
  */
 
 #include "device_parser.h"
@@ -82,12 +82,71 @@ std::string DeviceParser::sanitiseName(const std::string& raw) {
 }
 
 // ---------------------------------------------------------------------------
+// parseBeaconId
+//
+// Supported formats:
+//
+//  1. Apple iBeacon (companyId == 0x004C)
+//     payload: [0x02][0x15][16-byte UUID][2-byte major BE][2-byte minor BE][1-byte tx]
+//     → returns "<major>:<minor>" (decimal)
+//
+//  2. Custom BLE-Attendance (companyId == 0xFFFF)
+//     payload: [0x42][0x41][len][utf8 bytes…]
+//     → returns the embedded unique_id string
+// ---------------------------------------------------------------------------
+std::string DeviceParser::parseBeaconId(uint16_t companyId,
+                                         const std::vector<uint8_t>& payload) {
+    if (companyId == IBEACON_COMPANY_ID) {
+        // Need at least IBEACON_PAYLOAD_SIZE bytes
+        if (payload.size() < IBEACON_PAYLOAD_SIZE) return {};
+        if (payload[0] != IBEACON_SUBTYPE)     return {};
+        if (payload[1] != IBEACON_SUBTYPE_LEN) return {};
+
+        // Major at bytes 18–19 (big-endian), minor at bytes 20–21 (big-endian)
+        // UUID occupies bytes 2–17
+        uint16_t major = (static_cast<uint16_t>(payload[18]) << 8) |
+                          static_cast<uint16_t>(payload[19]);
+        uint16_t minor = (static_cast<uint16_t>(payload[20]) << 8) |
+                          static_cast<uint16_t>(payload[21]);
+
+        std::ostringstream oss;
+        oss << major << ":" << minor;
+        return oss.str();
+    }
+
+    if (companyId == CUSTOM_COMPANY_ID) {
+        // Need magic bytes + length byte
+        if (payload.size() < CUSTOM_MIN_PAYLOAD) return {};
+        if (payload[0] != CUSTOM_MAGIC_0) return {};
+        if (payload[1] != CUSTOM_MAGIC_1) return {};
+
+        uint8_t len = payload[2];
+        if (len == 0 || payload.size() < static_cast<size_t>(3 + len)) return {};
+
+        // Limit to 64 characters
+        size_t actualLen = std::min(static_cast<size_t>(len), static_cast<size_t>(64));
+        std::string uid(reinterpret_cast<const char*>(payload.data() + 3), actualLen);
+
+        // Ensure printable ASCII / valid UTF-8 (strip control chars)
+        std::string safe;
+        safe.reserve(uid.size());
+        for (unsigned char c : uid) {
+            if (c >= 0x20) safe.push_back(static_cast<char>(c));
+        }
+        return safe;
+    }
+
+    return {};
+}
+
+// ---------------------------------------------------------------------------
 // buildEvent
 // ---------------------------------------------------------------------------
 std::optional<DeviceEvent> DeviceParser::buildEvent(const std::string& address,
                                                       const std::string& name,
                                                       int rssi,
-                                                      int64_t timestamp) {
+                                                      int64_t timestamp,
+                                                      const std::string& beacon_id) {
     if (!validateMac(address))  return std::nullopt;
     if (!validateRssi(rssi))    return std::nullopt;
     if (timestamp <= 0)         return std::nullopt;
@@ -97,6 +156,7 @@ std::optional<DeviceEvent> DeviceParser::buildEvent(const std::string& address,
     ev.name      = sanitiseName(name);
     ev.rssi      = rssi;
     ev.timestamp = timestamp;
+    ev.beacon_id = beacon_id;
     return ev;
 }
 

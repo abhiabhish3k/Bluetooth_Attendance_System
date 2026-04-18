@@ -39,8 +39,8 @@ def validate_scan_event(event: dict) -> tuple[bool, Optional[str]]:
     """
     Validate a raw BLE scan event dictionary.
 
-    Expected keys: address, rssi, timestamp.
-    Optional keys: name.
+    Required keys: address, rssi, timestamp.
+    Optional keys: name, beacon_id.
 
     Returns (is_valid, error_message).
     """
@@ -67,5 +67,10 @@ def validate_scan_event(event: dict) -> tuple[bool, Optional[str]]:
         return False, f"Timestamp must be an integer, got: {event['timestamp']!r}"
     if not validate_timestamp(ts):
         return False, f"Timestamp {ts} is not a valid Unix timestamp"
+
+    if "beacon_id" in event and event["beacon_id"] is not None:
+        bid = str(event["beacon_id"]).strip()
+        if len(bid) > 64:
+            return False, "beacon_id too long (max 64 characters)"
 
     return True, None
