@@ -123,8 +123,8 @@ std::string DeviceParser::parseBeaconId(uint16_t companyId,
         uint8_t len = payload[2];
         if (len == 0 || payload.size() < static_cast<size_t>(3 + len)) return {};
 
-        // Limit to 64 characters
-        size_t actualLen = std::min(static_cast<size_t>(len), static_cast<size_t>(64));
+        // Limit to CUSTOM_MAX_UID_LENGTH characters
+        size_t actualLen = std::min(static_cast<size_t>(len), CUSTOM_MAX_UID_LENGTH);
         std::string uid(reinterpret_cast<const char*>(payload.data() + 3), actualLen);
 
         // Ensure printable ASCII / valid UTF-8 (strip control chars)

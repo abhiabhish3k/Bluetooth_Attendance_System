@@ -29,12 +29,13 @@ static constexpr size_t   IBEACON_PAYLOAD_SIZE   = 23;   // subtype(1)+len(1)+UU
  * Payload layout:
  *   [0x42][0x41] ("BA" magic)  2 bytes
  *   [length]                   1 byte  – number of UTF-8 bytes that follow
- *   [unique_id bytes]          up to 61 bytes
+ *   [unique_id bytes]          up to CUSTOM_MAX_UID_LENGTH bytes
  */
 static constexpr uint16_t CUSTOM_COMPANY_ID     = 0xFFFF;
 static constexpr uint8_t  CUSTOM_MAGIC_0        = 0x42; // 'B'
 static constexpr uint8_t  CUSTOM_MAGIC_1        = 0x41; // 'A'
 static constexpr size_t   CUSTOM_MIN_PAYLOAD    = 3;    // magic(2) + length(1)
+static constexpr size_t   CUSTOM_MAX_UID_LENGTH = 64;   // max unique_id bytes
 
 /**
  * Utilities for parsing and validating BLE device data.

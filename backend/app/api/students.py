@@ -208,7 +208,10 @@ async def register_beacon(
         beacon_row.beacon_data = payload.beacon_id
         beacon_row.advertised = True
 
-    # Also store in student.unique_id for fast look-ups at scan time
+    # Also store in student.unique_id for fast direct look-ups at scan time.
+    # Note: beacon_data and unique_id intentionally hold the same value so
+    # the scanner can match students via either path. Both must be updated
+    # together to stay consistent (this endpoint is the single point of change).
     student.unique_id = payload.beacon_id
 
     try:

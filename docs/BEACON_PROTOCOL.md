@@ -47,11 +47,11 @@ Data :
 "<major>:<minor>"
 ```
 
-Examples:
-- Major = 1, Minor = 1001  →  beacon_id = `"1:1001"`
-- Major = 1, Minor = 42    →  beacon_id = `"1:42"`
-
-The `beacon_id` is sent to the backend inside the JSON scan event.
+The `beacon_id` is always the full `"<major>:<minor>"` string (e.g. `"1:1001"`).
+This is the value stored in `students.unique_id` and registered via the API.
+When the admin tells a student "Your Beacon ID is **1001**", they mean the
+Minor value only – the full `beacon_id` the system uses is `"1:1001"` where
+`1` is the configured Major for the institution.
 
 ---
 

@@ -142,6 +142,18 @@ async def process_scan_event(event: ScanEvent, db: AsyncSession) -> dict:
         )
         student = result.scalar_one_or_none()
 
+        if student is not None:
+            # Update last_seen in the student_beacon table if a row exists
+            beacon_result = await db.execute(
+                select(StudentBeaconORM).where(
+                    StudentBeaconORM.student_id == student.id
+                )
+            )
+            beacon_row = beacon_result.scalar_one_or_none()
+            if beacon_row is not None:
+                beacon_row.last_seen = detected_time
+                db.add(beacon_row)
+
         # Fallback: check the student_beacon mapping table
         if student is None:
             beacon_result = await db.execute(

@@ -31,6 +31,7 @@ class _BeaconScreenState extends State<BeaconScreen>
     with SingleTickerProviderStateMixin {
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
+  late Animation<double> _stoppedAnimation;
 
   Timer? _statusTimer;
   bool _broadcasting = false;
@@ -50,6 +51,8 @@ class _BeaconScreenState extends State<BeaconScreen>
       parent: _pulseController,
       curve: Curves.easeInOut,
     ));
+
+    _stoppedAnimation = const AlwaysStoppedAnimation(1.0);
 
     _startBeacon();
     _statusTimer =
@@ -125,7 +128,7 @@ class _BeaconScreenState extends State<BeaconScreen>
 
               // Animated pulse indicator
               ScaleTransition(
-                scale: _broadcasting ? _pulseAnimation : const AlwaysStoppedAnimation(1.0),
+                scale: _broadcasting ? _pulseAnimation : _stoppedAnimation,
                 child: Container(
                   width: 140,
                   height: 140,

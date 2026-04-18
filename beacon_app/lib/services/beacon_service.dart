@@ -33,8 +33,11 @@ class BeaconService {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_prefKey);
     if (raw != null) {
-      _config = StudentConfig.fromMap(
-          Map<String, dynamic>.from(jsonDecode(raw) as Map));
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) {
+        _config = StudentConfig.fromMap(
+            Map<String, dynamic>.from(decoded));
+      }
     }
   }
 
