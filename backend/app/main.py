@@ -13,6 +13,7 @@ from .config import settings
 from .models.student import Base as StudentBase
 from .models.session import Base as SessionBase  # noqa: F401 – same Base via inheritance
 from .models.attendance import AttendanceORM, ScanLogORM  # noqa: F401 – register models
+from .models.student import StudentBeaconORM  # noqa: F401 – register beacon model
 
 # Configure logging
 logging.basicConfig(

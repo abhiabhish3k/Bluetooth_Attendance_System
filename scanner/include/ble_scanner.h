@@ -10,12 +10,18 @@ namespace ble {
 
 /**
  * Represents a detected BLE device event.
+ *
+ * beacon_id is populated when the device's ManufacturerData contains a
+ * recognised beacon payload (iBeacon or custom BLE-Attendance format).
+ * When non-empty, the backend uses beacon_id to identify the student
+ * instead of the MAC address.
  */
 struct DeviceEvent {
     std::string address;    ///< MAC address (e.g. "AA:BB:CC:DD:EE:FF")
     std::string name;       ///< Advertising name (may be empty)
     int         rssi;       ///< Signal strength in dBm
     int64_t     timestamp;  ///< Unix timestamp (seconds)
+    std::string beacon_id;  ///< Extracted beacon identifier (may be empty)
 };
 
 /**
@@ -79,6 +85,7 @@ private:
     void handleInterfacesAdded(DBusMessage* msg);
     void handlePropertiesChanged(DBusMessage* msg);
     void parseDevice1Properties(const std::string& objPath, DBusMessageIter* iter);
+    std::string parseManufacturerData(DBusMessageIter* iter);
 
     static DBusHandlerResult messageFilter(DBusConnection* conn,
                                            DBusMessage* msg,

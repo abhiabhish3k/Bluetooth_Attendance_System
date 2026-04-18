@@ -62,13 +62,27 @@ void Logger::logEvent(const DeviceEvent& event) {
         else safeName += c;
     }
 
+    // Escape beacon_id the same way
+    std::string safeBeaconId;
+    safeBeaconId.reserve(event.beacon_id.size());
+    for (char c : event.beacon_id) {
+        if (c == '"')  safeBeaconId += "\\\"";
+        else if (c == '\\') safeBeaconId += "\\\\";
+        else safeBeaconId += c;
+    }
+
     std::ostringstream oss;
     oss << "{"
-        << "\"address\":\"" << event.address << "\","
-        << "\"name\":\""    << safeName       << "\","
-        << "\"rssi\":"      << event.rssi     << ","
-        << "\"timestamp\":" << event.timestamp
-        << "}";
+        << "\"address\":\"" << event.address  << "\","
+        << "\"name\":\""    << safeName        << "\","
+        << "\"rssi\":"      << event.rssi      << ","
+        << "\"timestamp\":" << event.timestamp;
+
+    if (!event.beacon_id.empty()) {
+        oss << ",\"beacon_id\":\"" << safeBeaconId << "\"";
+    }
+
+    oss << "}";
 
     writeLine(oss.str());
 }

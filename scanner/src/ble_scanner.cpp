@@ -3,6 +3,11 @@
  *
  * Monitors BlueZ ObjectManager and Device1 property signals to detect
  * nearby BLE devices and deliver DeviceEvents to the registered callback.
+ *
+ * Beacon parsing: when a device advertises ManufacturerData, the parser
+ * attempts to extract a student unique_id.  Two formats are supported:
+ *   - Apple iBeacon (company 0x004C): "major:minor" string
+ *   - Custom BLE-Attendance (company 0xFFFF): embedded UTF-8 unique_id
  */
 
 #include "ble_scanner.h"
@@ -12,6 +17,7 @@
 #include <cstring>
 #include <ctime>
 #include <stdexcept>
+#include <vector>
 
 namespace ble {
 
@@ -311,7 +317,7 @@ void BleScanner::handlePropertiesChanged(DBusMessage* msg) {
 }
 
 // ---------------------------------------------------------------------------
-// Extract address, name, RSSI from a Device1 property dict
+// Extract address, name, RSSI, and ManufacturerData from a Device1 property dict
 // ---------------------------------------------------------------------------
 void BleScanner::parseDevice1Properties(const std::string& objPath,
                                          DBusMessageIter* iter) {
@@ -319,6 +325,7 @@ void BleScanner::parseDevice1Properties(const std::string& objPath,
     std::string name;
     int rssi = 0;
     bool hasRssi = false;
+    std::string beacon_id;
 
     // The iterator should point at an ARRAY of DICT_ENTRY {string, variant}
     DBusMessageIter propArray;
@@ -363,6 +370,11 @@ void BleScanner::parseDevice1Properties(const std::string& objPath,
             dbus_message_iter_get_basic(&variant, &r);
             rssi    = static_cast<int>(r);
             hasRssi = true;
+
+        } else if (std::string(propName) == "ManufacturerData" &&
+                   vType == DBUS_TYPE_ARRAY) {
+            // ManufacturerData is a{qv} – dict<uint16, variant<array<byte>>>
+            beacon_id = parseManufacturerData(&variant);
         }
 
         dbus_message_iter_next(&propArray);
@@ -376,10 +388,72 @@ void BleScanner::parseDevice1Properties(const std::string& objPath,
     if (!hasRssi || address.empty()) return;
 
     auto evOpt = DeviceParser::buildEvent(address, name, rssi,
-                                           static_cast<int64_t>(std::time(nullptr)));
+                                           static_cast<int64_t>(std::time(nullptr)),
+                                           beacon_id);
     if (evOpt && m_callback) {
         m_callback(*evOpt);
     }
+}
+
+// ---------------------------------------------------------------------------
+// parseManufacturerData
+//
+// Iterates over the ManufacturerData dictionary (a{qv}) and for each entry
+// passes the company ID and payload bytes to DeviceParser::parseBeaconId.
+// Returns the first recognised beacon identifier, or empty string.
+// ---------------------------------------------------------------------------
+std::string BleScanner::parseManufacturerData(DBusMessageIter* iter) {
+    // iter currently points at the variant wrapping the a{qv} array
+    // Recurse into the variant to get the array
+    DBusMessageIter arrayIter;
+    dbus_message_iter_recurse(iter, &arrayIter);
+
+    while (dbus_message_iter_get_arg_type(&arrayIter) == DBUS_TYPE_DICT_ENTRY) {
+        DBusMessageIter dictEntry;
+        dbus_message_iter_recurse(&arrayIter, &dictEntry);
+
+        // Key: uint16 company ID
+        if (dbus_message_iter_get_arg_type(&dictEntry) != DBUS_TYPE_UINT16) {
+            dbus_message_iter_next(&arrayIter);
+            continue;
+        }
+        dbus_uint16_t companyId = 0;
+        dbus_message_iter_get_basic(&dictEntry, &companyId);
+        dbus_message_iter_next(&dictEntry);
+
+        // Value: variant wrapping array of bytes
+        if (dbus_message_iter_get_arg_type(&dictEntry) != DBUS_TYPE_VARIANT) {
+            dbus_message_iter_next(&arrayIter);
+            continue;
+        }
+        DBusMessageIter valueVariant;
+        dbus_message_iter_recurse(&dictEntry, &valueVariant);
+
+        if (dbus_message_iter_get_arg_type(&valueVariant) != DBUS_TYPE_ARRAY) {
+            dbus_message_iter_next(&arrayIter);
+            continue;
+        }
+        DBusMessageIter byteArray;
+        dbus_message_iter_recurse(&valueVariant, &byteArray);
+
+        std::vector<uint8_t> payload;
+        while (dbus_message_iter_get_arg_type(&byteArray) == DBUS_TYPE_BYTE) {
+            uint8_t byte = 0;
+            dbus_message_iter_get_basic(&byteArray, &byte);
+            payload.push_back(byte);
+            dbus_message_iter_next(&byteArray);
+        }
+
+        std::string beaconId = DeviceParser::parseBeaconId(
+            static_cast<uint16_t>(companyId), payload);
+        if (!beaconId.empty()) {
+            return beaconId;
+        }
+
+        dbus_message_iter_next(&arrayIter);
+    }
+
+    return {};
 }
 
 } // namespace ble

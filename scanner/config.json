@@ -3,5 +3,7 @@
   "rssi_threshold": -80,
   "dedup_window": 5,
   "log_file": "scanner.log",
-  "log_level": "INFO"
+  "log_level": "INFO",
+  "beacon_uuid": "A8B3F9E2-C4D5-4F6A-7B8C-9D0E1F2A3B4C",
+  "beacon_major": 1
 }

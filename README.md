@@ -2,23 +2,44 @@
 
 A production-grade, automated student attendance system using Bluetooth Low Energy (BLE).
 
-The C++ scanner detects nearby BLE devices via BlueZ on Linux, emits structured JSON events, and the Python FastAPI backend matches device MAC addresses to registered students, recording attendance in a SQLite database.
+Students run a **beacon app** on their phones that advertises their unique student ID via
+BLE manufacturer data.  The C++ scanner on a Raspberry Pi (or any Linux machine with
+BlueZ) detects the beacons, emits structured JSON events, and the Python FastAPI backend
+matches beacon IDs to registered students, recording attendance in a SQLite database.
+
+MAC-address-based detection is still fully supported as a fallback for devices without
+the beacon app.
 
 ---
 
 ## Architecture
 
 ```
-BLE Devices (phones)
-       │
-       ▼
-C++ Scanner (BlueZ D-Bus)
-       │  JSON: {"address":"AA:BB:CC:...","rssi":-62,"timestamp":...}
-       ▼
-Python FastAPI Backend
-       │
-       ▼
-SQLite Database
+┌────────────────────────────────────────────────────────────────┐
+│            Student Phones (beacon_app Flutter)                 │
+│  BLE iBeacon: UUID / Major / Minor (= student beacon ID)       │
+└──────────────────────────┬─────────────────────────────────────┘
+                           │ BLE radio
+                           ▼
+┌────────────────────────────────────────────────────────────────┐
+│              C++ Scanner (BlueZ D-Bus, Linux)                  │
+│  Parses ManufacturerData → extracts beacon_id                  │
+│  JSON: {"address":"AA:BB:...","rssi":-62,"timestamp":...,      │
+│         "beacon_id":"1:1001"}                                   │
+└──────────────────────────┬─────────────────────────────────────┘
+                           │ HTTP POST /api/events
+                           ▼
+┌────────────────────────────────────────────────────────────────┐
+│              Python FastAPI Backend                            │
+│  Matches beacon_id → student.unique_id                         │
+│  Falls back to MAC address if no beacon data                   │
+└──────────────────────────┬─────────────────────────────────────┘
+                           │
+                           ▼
+┌────────────────────────────────────────────────────────────────┐
+│                     SQLite Database                            │
+│  students · sessions · attendance · scan_logs · student_beacon │
+└────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -27,6 +48,18 @@ SQLite Database
 
 ```
 bluetooth-attendance-system/
+├── beacon_app/               # Flutter student beacon app (Android + iOS)
+│   ├── pubspec.yaml
+│   ├── README.md
+│   ├── lib/
+│   │   ├── main.dart
+│   │   ├── models/student_config.dart
+│   │   ├── screens/
+│   │   │   ├── login_screen.dart
+│   │   │   └── beacon_screen.dart
+│   │   └── services/beacon_service.dart
+│   ├── android/              # Android manifest + permissions
+│   └── ios/                  # iOS Info.plist + background modes
 ├── scanner/                  # C++ BLE scanner (BlueZ D-Bus)
 │   ├── CMakeLists.txt
 │   ├── config.json
@@ -64,7 +97,8 @@ bluetooth-attendance-system/
 │   └── reset_db.sh
 └── docs/
     ├── architecture.md
-    └── API.md
+    ├── API.md
+    └── BEACON_PROTOCOL.md    # Beacon format & integration guide
 ```
 
 ---
@@ -107,10 +141,21 @@ bash scripts/run_backend.sh
 
 ### 6. Register Students
 
+Register each student with an optional `unique_id` (the beacon ID they will
+broadcast from the phone app):
+
 ```bash
 curl -X POST http://localhost:8000/api/students \
   -H "Content-Type: application/json" \
-  -d '{"name":"Alice","roll_number":"CS001","email":"alice@example.com","mac_address":"AA:BB:CC:DD:EE:FF"}'
+  -d '{"name":"Alice","roll_number":"CS001","email":"alice@example.com","mac_address":"AA:BB:CC:DD:EE:FF","unique_id":"1:1001"}'
+```
+
+If you need to add or update a beacon registration later:
+
+```bash
+curl -X POST http://localhost:8000/api/students/1/beacon/register \
+  -H "Content-Type: application/json" \
+  -d '{"beacon_id": "1:1001"}'
 ```
 
 ### 7. Create a Session
@@ -146,6 +191,8 @@ curl http://localhost:8000/api/attendance/report/1
 | `dedup_window` | `5` | Seconds to suppress duplicate events |
 | `log_file` | `scanner.log` | Log file path |
 | `log_level` | `INFO` | Log verbosity (DEBUG/INFO/WARN/ERROR) |
+| `beacon_uuid` | `A8B3F9E2-...` | Expected iBeacon UUID (informational) |
+| `beacon_major` | `1` | Expected iBeacon Major (informational) |
 
 ### Backend (environment variables or `.env`)
 
@@ -166,6 +213,8 @@ curl http://localhost:8000/api/attendance/report/1
 | `POST` | `/api/events/batch` | Receive multiple events |
 | `GET`  | `/api/students` | List students |
 | `POST` | `/api/students` | Register a student |
+| `POST` | `/api/students/{id}/beacon/register` | Register beacon ID for a student |
+| `GET`  | `/api/students/{id}/beacon` | Get a student's beacon registration |
 | `POST` | `/api/sessions` | Create a session |
 | `GET`  | `/api/sessions/active` | Get active session |
 | `GET`  | `/api/attendance/report/{id}` | Get attendance report |
@@ -179,12 +228,16 @@ Full documentation: [docs/API.md](docs/API.md)
 
 1. **C++ Scanner** starts BlueZ discovery on `hci0`
 2. BlueZ fires D-Bus `InterfacesAdded` / `PropertiesChanged` signals as devices are seen
-3. Scanner extracts MAC address, RSSI, device name → builds JSON event
+3. Scanner extracts MAC address, RSSI, device name, **and ManufacturerData** → parses beacon_id
 4. 5-second deduplication prevents spam from the same device
-5. JSON event is sent via `curl` to `POST /api/events`
-6. Backend validates the event, looks up the MAC in the students table
+5. JSON event (including `beacon_id` if detected) is sent via `curl` to `POST /api/events`
+6. Backend validates the event:
+   - If `beacon_id` is present → look up `students.unique_id` or `student_beacon.beacon_data`
+   - Otherwise → fall back to MAC address look-up (backward compatible)
 7. If a matching student is found and RSSI ≥ threshold, attendance is recorded
 8. Teacher queries `GET /api/attendance/report/{session_id}` for the final list
+
+See [docs/BEACON_PROTOCOL.md](docs/BEACON_PROTOCOL.md) for the full beacon integration guide.
 
 ---
 

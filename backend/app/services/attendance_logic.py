@@ -1,8 +1,8 @@
 """
 Core attendance processing logic.
 
-Receives validated BLE scan events, matches MAC addresses to students,
-and records attendance for the active session.
+Receives validated BLE scan events, matches MAC addresses or beacon IDs to
+students, and records attendance for the active session.
 """
 
 import logging
@@ -12,7 +12,7 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 
-from ..models.student import StudentORM
+from ..models.student import StudentORM, StudentBeaconORM
 from ..models.session import SessionORM
 from ..models.attendance import AttendanceORM, ScanLogORM
 from ..config import settings
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Scan event Pydantic schema
 # ---------------------------------------------------------------------------
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 from ..utils.validators import validate_mac_address, normalise_mac, validate_rssi
 
 
@@ -32,6 +32,7 @@ class ScanEvent(BaseModel):
     rssi: int
     timestamp: int
     name: str = ""
+    beacon_id: Optional[str] = None
 
     @field_validator("address")
     @classmethod
@@ -46,6 +47,14 @@ class ScanEvent(BaseModel):
         if not validate_rssi(v):
             raise ValueError(f"RSSI {v} out of valid range")
         return v
+
+    @field_validator("beacon_id")
+    @classmethod
+    def clean_beacon_id(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        v = v.strip()
+        return v if v else None
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +85,7 @@ async def process_scan_event(event: ScanEvent, db: AsyncSession) -> dict:
       1. Log it to scan_logs (always).
       2. Find the active session (from DB if not cached).
       3. Check if event meets RSSI threshold.
-      4. Match MAC to a student.
+      4. Match beacon_id → student (preferred) or MAC → student (fallback).
       5. Mark attendance (idempotent – first detection wins).
 
     Returns a status dict describing what happened.
@@ -90,12 +99,13 @@ async def process_scan_event(event: ScanEvent, db: AsyncSession) -> dict:
     session_id = session.session_id if session else None
 
     # ------------------------------------------------------------------
-    # Step 2: Log raw event
+    # Step 2: Log raw event (including beacon_id if present)
     # ------------------------------------------------------------------
     scan_log = ScanLogORM(
         mac_address=event.address,
         rssi=event.rssi,
         device_name=event.name or None,
+        beacon_id=event.beacon_id or None,
         detected_time=detected_time,
         session_id=session_id,
     )
@@ -121,16 +131,63 @@ async def process_scan_event(event: ScanEvent, db: AsyncSession) -> dict:
         }
 
     # ------------------------------------------------------------------
-    # Step 4: Match MAC to student
+    # Step 4: Match student – beacon_id takes priority over MAC address
     # ------------------------------------------------------------------
-    result = await db.execute(
-        select(StudentORM).where(StudentORM.mac_address == event.address)
-    )
-    student = result.scalar_one_or_none()
+    student = None
+
+    if event.beacon_id:
+        # Try matching via unique_id column on students table
+        result = await db.execute(
+            select(StudentORM).where(StudentORM.unique_id == event.beacon_id)
+        )
+        student = result.scalar_one_or_none()
+
+        if student is not None:
+            # Update last_seen in the student_beacon table if a row exists
+            beacon_result = await db.execute(
+                select(StudentBeaconORM).where(
+                    StudentBeaconORM.student_id == student.id
+                )
+            )
+            beacon_row = beacon_result.scalar_one_or_none()
+            if beacon_row is not None:
+                beacon_row.last_seen = detected_time
+                db.add(beacon_row)
+
+        # Fallback: check the student_beacon mapping table
+        if student is None:
+            beacon_result = await db.execute(
+                select(StudentBeaconORM).where(
+                    StudentBeaconORM.beacon_data == event.beacon_id
+                )
+            )
+            beacon_row = beacon_result.scalar_one_or_none()
+            if beacon_row:
+                stu_result = await db.execute(
+                    select(StudentORM).where(StudentORM.id == beacon_row.student_id)
+                )
+                student = stu_result.scalar_one_or_none()
+
+                # Update last_seen on the beacon row
+                if student is not None:
+                    beacon_row.last_seen = detected_time
+                    db.add(beacon_row)
+
+    if student is None:
+        # Fallback: match by MAC address
+        result = await db.execute(
+            select(StudentORM).where(StudentORM.mac_address == event.address)
+        )
+        student = result.scalar_one_or_none()
 
     if student is None:
         await db.commit()
-        return {"status": "ignored", "reason": "unknown_device", "mac": event.address}
+        return {
+            "status": "ignored",
+            "reason": "unknown_device",
+            "mac": event.address,
+            "beacon_id": event.beacon_id,
+        }
 
     # ------------------------------------------------------------------
     # Step 5: Record attendance (idempotent)
@@ -161,8 +218,8 @@ async def process_scan_event(event: ScanEvent, db: AsyncSession) -> dict:
     await db.commit()
 
     logger.info(
-        "Attendance marked: student=%s session=%s rssi=%d",
-        student.id, session.session_id, event.rssi,
+        "Attendance marked: student=%s session=%s rssi=%d beacon=%s",
+        student.id, session.session_id, event.rssi, event.beacon_id or "MAC",
     )
     return {
         "status": "marked",
@@ -170,6 +227,7 @@ async def process_scan_event(event: ScanEvent, db: AsyncSession) -> dict:
         "student_name": student.name,
         "session_id": session.session_id,
         "rssi": event.rssi,
+        "matched_by": "beacon" if event.beacon_id else "mac",
     }
 
 
