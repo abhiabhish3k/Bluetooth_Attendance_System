@@ -29,6 +29,9 @@ develop-eggs/
 .installed.cfg
 lib/
 lib64/
+# Keep the Flutter app's lib/ directory
+!beacon_app/lib/
+!beacon_app/lib/**
 venv/
 .venv/
 env/
