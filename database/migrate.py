@@ -56,7 +56,7 @@ def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
     return row is not None
 
 
-def _needs_migration(conn: sqlite3.Connection) -> bool:
+def needs_migration(conn: sqlite3.Connection) -> bool:
     """Return True if the database is missing any of the new Beacon UUID columns.
 
     Returns False for a brand-new (empty) database because schema.sql will
@@ -144,7 +144,7 @@ def migrate(db_path: Path) -> None:
     conn.execute("PRAGMA foreign_keys = ON")
 
     try:
-        if not _needs_migration(conn):
+        if not needs_migration(conn):
             print("[migrate] Database is already up-to-date; no migration needed.")
             return
 

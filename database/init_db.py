@@ -19,7 +19,7 @@ import os
 import sys
 from pathlib import Path
 
-from migrate import run_migrations, _needs_migration
+from migrate import run_migrations, needs_migration
 
 SCHEMA_FILE = Path(__file__).parent / "schema.sql"
 DEFAULT_DB  = Path(__file__).parent.parent / "backend" / "attendance.db"
@@ -32,7 +32,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
     the migration is applied first so that all columns exist before the index
     creation statements in schema.sql are executed.
     """
-    if _needs_migration(conn):
+    if needs_migration(conn):
         print("[init_db] Old schema detected – running migrations first …")
         run_migrations(conn)
 
