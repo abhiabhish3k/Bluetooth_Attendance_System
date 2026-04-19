@@ -125,6 +125,13 @@ export default function App() {
   }, [flash]);
 
   const setMessage = (type, text) => setFlash({ type, text });
+  const toIsoDateTime = (value, label) => {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new Error(`Invalid ${label}.`);
+    }
+    return parsed.toISOString();
+  };
 
   const loadStudents = useCallback(async (search = "") => {
     const res = await api.listStudents(search.trim());
@@ -162,7 +169,7 @@ export default function App() {
     try {
       await Promise.all([loadStudents(studentSearch), loadSessions(), loadAttendanceList()]);
       if (selectedSessionId) await loadReport(selectedSessionId);
-      setMessage("success", "Data refreshed.");
+      setMessage("success", "Data refreshed (filters preserved).");
     } catch (e) {
       setMessage("error", e?.response?.data?.detail || "Failed to refresh data.");
     } finally {
@@ -171,7 +178,27 @@ export default function App() {
   }, [loadAttendanceList, loadReport, loadSessions, loadStudents, selectedSessionId, studentSearch]);
 
   useEffect(() => {
-    refreshAll();
+    const run = async () => {
+      setLoading(true);
+      try {
+        const [studentsRes, sessionsRes, activeRes, attendanceRes] = await Promise.all([
+          api.listStudents(),
+          api.getSessions(),
+          api.getActiveSession(),
+          api.listAttendance({}),
+        ]);
+        setStudents(studentsRes.data);
+        setSessions(sessionsRes.data);
+        setActiveSession(activeRes.data?.active ? activeRes.data.session : null);
+        setAttendance(attendanceRes.data);
+        setMessage("success", "Data loaded.");
+      } catch (e) {
+        setMessage("error", e?.response?.data?.detail || "Failed to refresh data.");
+      } finally {
+        setLoading(false);
+      }
+    };
+    run();
   }, []);
 
   useEffect(() => {
@@ -257,18 +284,20 @@ export default function App() {
   const handleCreateSession = async (e) => {
     e.preventDefault();
     try {
+      const threshold = Number(newSession.threshold_rssi);
+      if (Number.isNaN(threshold)) throw new Error("Invalid RSSI threshold.");
       const payload = {
         class_name: newSession.class_name,
-        start_time: new Date(newSession.start_time).toISOString(),
-        threshold_rssi: Number(newSession.threshold_rssi),
+        start_time: toIsoDateTime(newSession.start_time, "session start time"),
+        threshold_rssi: threshold,
       };
-      if (newSession.end_time) payload.end_time = new Date(newSession.end_time).toISOString();
+      if (newSession.end_time) payload.end_time = toIsoDateTime(newSession.end_time, "session end time");
       await api.createSession(payload);
       setNewSession({ class_name: "", start_time: "", end_time: "", threshold_rssi: -75 });
       await loadSessions();
       setMessage("success", "Session created.");
     } catch (err) {
-      setMessage("error", err?.response?.data?.detail || "Could not create session.");
+      setMessage("error", err?.response?.data?.detail || err?.message || "Could not create session.");
     }
   };
 
@@ -286,8 +315,15 @@ export default function App() {
   const handlePatchSession = async () => {
     if (!selectedSessionId) return;
     const payload = {};
-    if (sessionPatch.end_time) payload.end_time = new Date(sessionPatch.end_time).toISOString();
-    if (sessionPatch.threshold_rssi !== "") payload.threshold_rssi = Number(sessionPatch.threshold_rssi);
+    if (sessionPatch.end_time) payload.end_time = toIsoDateTime(sessionPatch.end_time, "session end time");
+    if (sessionPatch.threshold_rssi !== "") {
+      const threshold = Number(sessionPatch.threshold_rssi);
+      if (Number.isNaN(threshold)) {
+        setMessage("error", "Invalid RSSI threshold.");
+        return;
+      }
+      payload.threshold_rssi = threshold;
+    }
     if (!Object.keys(payload).length) {
       setMessage("error", "Provide end time or threshold to update.");
       return;
@@ -340,7 +376,7 @@ export default function App() {
               Manage students, beacon mapping, sessions, attendance, and reports.
             </p>
           </div>
-          <button style={btn} onClick={refreshAll} disabled={loading}>{loading ? "Refreshing..." : "Refresh All"}</button>
+          <button aria-label="Refresh All" style={btn} onClick={refreshAll} disabled={loading}>{loading ? "Refreshing..." : "Refresh All"}</button>
         </header>
 
         {flash.text && (
@@ -356,8 +392,8 @@ export default function App() {
           <section style={section}>
             <h2 style={{ marginTop: 0 }}>Students</h2>
             <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-              <input style={{ ...input, flex: 1 }} value={studentSearch} onChange={(e) => setStudentSearch(e.target.value)} placeholder="Search by name/roll" />
-              <button style={btn} onClick={() => loadStudents(studentSearch)}>Search</button>
+              <input aria-label="Search students by name or roll number" style={{ ...input, flex: 1 }} value={studentSearch} onChange={(e) => setStudentSearch(e.target.value)} placeholder="Search by name/roll" />
+              <button aria-label="Search students" style={btn} onClick={() => loadStudents(studentSearch)}>Search</button>
             </div>
 
             <div style={{ maxHeight: 220, overflow: "auto", border: "1px solid #e2e8f0", borderRadius: 8, marginBottom: 10 }}>
@@ -384,11 +420,11 @@ export default function App() {
             </div>
 
             <form onSubmit={handleCreateStudent} style={{ display: "grid", gridTemplateColumns: "repeat(5,minmax(0,1fr))", gap: 8 }}>
-              <input style={input} placeholder="Name" value={newStudent.name} onChange={(e) => setNewStudent({ ...newStudent, name: e.target.value })} required />
-              <input style={input} placeholder="Roll Number" value={newStudent.roll_number} onChange={(e) => setNewStudent({ ...newStudent, roll_number: e.target.value })} required />
-              <input style={input} placeholder="Email" type="email" value={newStudent.email} onChange={(e) => setNewStudent({ ...newStudent, email: e.target.value })} required />
-              <input style={input} placeholder="MAC XX:XX:..." value={newStudent.mac_address} onChange={(e) => setNewStudent({ ...newStudent, mac_address: e.target.value })} required />
-              <input style={input} placeholder="Beacon unique_id (optional)" value={newStudent.unique_id} onChange={(e) => setNewStudent({ ...newStudent, unique_id: e.target.value })} />
+              <input aria-label="Student name" style={input} placeholder="Name" value={newStudent.name} onChange={(e) => setNewStudent({ ...newStudent, name: e.target.value })} required />
+              <input aria-label="Student roll number" style={input} placeholder="Roll Number" value={newStudent.roll_number} onChange={(e) => setNewStudent({ ...newStudent, roll_number: e.target.value })} required />
+              <input aria-label="Student email" style={input} placeholder="Email" type="email" value={newStudent.email} onChange={(e) => setNewStudent({ ...newStudent, email: e.target.value })} required />
+              <input aria-label="Student MAC address" style={input} placeholder="MAC XX:XX:..." value={newStudent.mac_address} onChange={(e) => setNewStudent({ ...newStudent, mac_address: e.target.value })} required />
+              <input aria-label="Student unique ID optional" style={input} placeholder="Beacon unique_id (optional)" value={newStudent.unique_id} onChange={(e) => setNewStudent({ ...newStudent, unique_id: e.target.value })} />
               <button style={{ ...btn, gridColumn: "1/-1" }} type="submit">Create Student</button>
             </form>
 
@@ -396,16 +432,16 @@ export default function App() {
               <div style={{ marginTop: 12, borderTop: "1px solid #e2e8f0", paddingTop: 10 }}>
                 <h3 style={{ margin: "0 0 8px" }}>Edit Student #{selectedStudent.id}</h3>
                 <form onSubmit={handleUpdateStudent} style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 8 }}>
-                  <input style={input} value={editStudent.name} onChange={(e) => setEditStudent({ ...editStudent, name: e.target.value })} required />
-                  <input style={input} type="email" value={editStudent.email} onChange={(e) => setEditStudent({ ...editStudent, email: e.target.value })} required />
-                  <input style={input} value={editStudent.mac_address} onChange={(e) => setEditStudent({ ...editStudent, mac_address: e.target.value })} required />
-                  <input style={input} value={editStudent.unique_id} onChange={(e) => setEditStudent({ ...editStudent, unique_id: e.target.value })} placeholder="unique_id" />
+                  <input aria-label="Edit student name" style={input} value={editStudent.name} onChange={(e) => setEditStudent({ ...editStudent, name: e.target.value })} required />
+                  <input aria-label="Edit student email" style={input} type="email" value={editStudent.email} onChange={(e) => setEditStudent({ ...editStudent, email: e.target.value })} required />
+                  <input aria-label="Edit student MAC address" style={input} value={editStudent.mac_address} onChange={(e) => setEditStudent({ ...editStudent, mac_address: e.target.value })} required />
+                  <input aria-label="Edit student unique ID" style={input} value={editStudent.unique_id} onChange={(e) => setEditStudent({ ...editStudent, unique_id: e.target.value })} placeholder="unique_id" />
                   <button style={btn} type="submit">Update</button>
                   <button style={{ ...btn, borderColor: "#fca5a5", background: "#fff1f2" }} type="button" onClick={handleDeleteStudent}>Delete Student</button>
                 </form>
 
                 <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-                  <input style={{ ...input, minWidth: 220 }} placeholder="beacon_id (e.g. 1:1001)" value={beaconValue} onChange={(e) => setBeaconValue(e.target.value)} />
+                  <input aria-label="Beacon ID" style={{ ...input, minWidth: 220 }} placeholder="beacon_id (e.g. 1:1001)" value={beaconValue} onChange={(e) => setBeaconValue(e.target.value)} />
                   <button style={btn} type="button" onClick={handleRegisterBeacon}>Register Beacon</button>
                   <button style={btn} type="button" onClick={handleLookupBeacon}>Get Beacon</button>
                   {beaconLookup && (
@@ -443,10 +479,10 @@ export default function App() {
             </div>
 
             <form onSubmit={handleCreateSession} style={{ display: "grid", gap: 8 }}>
-              <input style={input} placeholder="Class Name" value={newSession.class_name} onChange={(e) => setNewSession({ ...newSession, class_name: e.target.value })} required />
-              <input style={input} type="datetime-local" value={newSession.start_time} onChange={(e) => setNewSession({ ...newSession, start_time: e.target.value })} required />
-              <input style={input} type="datetime-local" value={newSession.end_time} onChange={(e) => setNewSession({ ...newSession, end_time: e.target.value })} />
-              <input style={input} type="number" value={newSession.threshold_rssi} onChange={(e) => setNewSession({ ...newSession, threshold_rssi: e.target.value })} />
+              <input aria-label="Session class name" style={input} placeholder="Class Name" value={newSession.class_name} onChange={(e) => setNewSession({ ...newSession, class_name: e.target.value })} required />
+              <input aria-label="Session start time" style={input} type="datetime-local" value={newSession.start_time} onChange={(e) => setNewSession({ ...newSession, start_time: e.target.value })} required />
+              <input aria-label="Session end time optional" style={input} type="datetime-local" value={newSession.end_time} onChange={(e) => setNewSession({ ...newSession, end_time: e.target.value })} />
+              <input aria-label="RSSI threshold" style={input} type="number" value={newSession.threshold_rssi} onChange={(e) => setNewSession({ ...newSession, threshold_rssi: e.target.value })} />
               <button style={btn} type="submit">Create Session</button>
             </form>
 
@@ -459,8 +495,8 @@ export default function App() {
                   </div>
                 )}
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                  <input style={input} type="datetime-local" value={sessionPatch.end_time} onChange={(e) => setSessionPatch({ ...sessionPatch, end_time: e.target.value })} placeholder="Set end time" />
-                  <input style={input} type="number" value={sessionPatch.threshold_rssi} onChange={(e) => setSessionPatch({ ...sessionPatch, threshold_rssi: e.target.value })} placeholder="Set threshold" />
+                  <input aria-label="Update session end time" style={input} type="datetime-local" value={sessionPatch.end_time} onChange={(e) => setSessionPatch({ ...sessionPatch, end_time: e.target.value })} placeholder="Set end time" />
+                  <input aria-label="Update RSSI threshold" style={input} type="number" value={sessionPatch.threshold_rssi} onChange={(e) => setSessionPatch({ ...sessionPatch, threshold_rssi: e.target.value })} placeholder="Set threshold" />
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <button style={btn} type="button" onClick={() => loadReport(selectedSessionId)}>Load Report</button>
@@ -514,8 +550,8 @@ export default function App() {
           <section style={section}>
             <h2 style={{ marginTop: 0 }}>Attendance Records</h2>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 8, marginBottom: 8 }}>
-              <input style={input} placeholder="Filter by session_id" value={attendanceSessionFilter} onChange={(e) => setAttendanceSessionFilter(e.target.value)} />
-              <input style={input} placeholder="Filter by student_id" value={attendanceStudentFilter} onChange={(e) => setAttendanceStudentFilter(e.target.value)} />
+              <input aria-label="Filter by session ID" style={input} placeholder="Filter by session_id" value={attendanceSessionFilter} onChange={(e) => setAttendanceSessionFilter(e.target.value)} />
+              <input aria-label="Filter by student ID" style={input} placeholder="Filter by student_id" value={attendanceStudentFilter} onChange={(e) => setAttendanceStudentFilter(e.target.value)} />
               <button style={btn} onClick={loadAttendanceList}>Apply</button>
             </div>
 
@@ -536,7 +572,7 @@ export default function App() {
                       <td style={{ padding: 8, borderTop: "1px solid #e2e8f0" }}>{a.attendance_id}</td>
                       <td style={{ padding: 8, borderTop: "1px solid #e2e8f0" }}>{a.student_id}</td>
                       <td style={{ padding: 8, borderTop: "1px solid #e2e8f0" }}>{a.session_id}</td>
-                      <td style={{ padding: 8, borderTop: "1px solid #e2e8f0" }}>{a.rssi}</td>
+                      <td style={{ padding: 8, borderTop: "1px solid #e2e8f0" }}>{a.rssi ?? "-"}</td>
                       <td style={{ padding: 8, borderTop: "1px solid #e2e8f0" }}>
                         <button style={{ ...btn, fontSize: 12 }} onClick={() => handleDeleteAttendance(a.attendance_id)}>
                           Delete
