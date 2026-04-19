@@ -7,10 +7,11 @@ from typing import Optional
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import func, delete, select
 from sqlalchemy.exc import IntegrityError
 
-from ..models.session import SessionORM, SessionCreate, SessionResponse, SessionUpdate
+from ..models.session import SessionORM, SessionCreate, SessionResponse, SessionUpdate, SessionDeleteResponse
+from ..models.attendance import AttendanceORM, ScanLogORM
 from ..services.attendance_logic import set_active_session, get_active_session_id
 
 logger = logging.getLogger(__name__)
@@ -165,3 +166,72 @@ async def activate_session(
         )
     set_active_session(session_id)
     return {"message": f"Session {session_id} activated", "session_id": session_id}
+
+
+@router.delete(
+    "/{session_id}",
+    summary="Delete a session and all associated records",
+    response_model=SessionDeleteResponse,
+)
+async def delete_session(
+    session_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(SessionORM).where(SessionORM.session_id == session_id)
+    )
+    session = result.scalar_one_or_none()
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Session {session_id} not found",
+        )
+
+    # Count associated records before deletion
+    att_count_result = await db.execute(
+        select(func.count()).where(AttendanceORM.session_id == session_id)
+    )
+    attendance_count = att_count_result.scalar_one()
+
+    scan_count_result = await db.execute(
+        select(func.count()).where(ScanLogORM.session_id == session_id)
+    )
+    scan_logs_count = scan_count_result.scalar_one()
+
+    deleted_at = datetime.now(tz=timezone.utc)
+    session_name = session.class_name
+
+    # Delete attendance records (FK ondelete=CASCADE handles DB-level deletion,
+    # but we delete explicitly so the ORM session stays consistent)
+    await db.execute(
+        delete(AttendanceORM).where(AttendanceORM.session_id == session_id)
+    )
+
+    # Delete the session itself (scan_logs.session_id will be SET NULL by FK)
+    await db.delete(session)
+    await db.commit()
+
+    # Clear active session cache if the deleted session was active
+    if get_active_session_id() == session_id:
+        set_active_session(None)
+        logger.info("Cleared active session cache (deleted session %s was active)", session_id)
+
+    logger.info(
+        "Session deleted: id=%s name=%r at=%s attendance_records=%d scan_logs=%d",
+        session_id,
+        session_name,
+        deleted_at.isoformat(),
+        attendance_count,
+        scan_logs_count,
+    )
+
+    return SessionDeleteResponse(
+        message="Session deleted successfully",
+        session_id=session_id,
+        class_name=session_name,
+        deleted_at=deleted_at,
+        records_deleted={
+            "attendance_count": attendance_count,
+            "scan_logs_count": scan_logs_count,
+        },
+    )

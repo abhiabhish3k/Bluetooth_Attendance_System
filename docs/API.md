@@ -232,6 +232,29 @@ Manually set a session as the active session for new scan events.
 
 ---
 
+#### `DELETE /api/sessions/{session_id}`
+Delete a session and all associated attendance records. Scan log entries linked to the session will have their session reference cleared (set to `null`).
+
+**Response 200**
+```json
+{
+  "message": "Session deleted successfully",
+  "session_id": 2,
+  "class_name": "CS101 Section A",
+  "deleted_at": "2026-04-19T12:30:00Z",
+  "records_deleted": {
+    "attendance_count": 25,
+    "scan_logs_count": 127
+  }
+}
+```
+
+**Response 404** – session not found
+
+> ⚠️ **Warning:** Deletion is irreversible. All attendance records for this session will be permanently removed.
+
+---
+
 ### Attendance
 
 #### `GET /api/attendance/report/{session_id}`
