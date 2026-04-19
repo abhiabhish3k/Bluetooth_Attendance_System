@@ -62,3 +62,11 @@ class SessionResponse(BaseModel):
 class SessionUpdate(BaseModel):
     end_time: Optional[datetime] = None
     threshold_rssi: Optional[int] = None
+
+
+class SessionDeleteResponse(BaseModel):
+    message: str
+    session_id: int
+    class_name: str
+    deleted_at: datetime
+    records_deleted: dict
