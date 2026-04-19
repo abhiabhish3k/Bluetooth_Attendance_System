@@ -55,7 +55,7 @@ async def create_session(
     start = new_session.start_time
     if not start.tzinfo:
         start = start.replace(tzinfo=timezone.utc)
-    if abs((start - now).total_seconds()) <= 60:
+    if abs((start - now).total_seconds()) <= 6000:
         set_active_session(new_session.session_id)
 
     return new_session
