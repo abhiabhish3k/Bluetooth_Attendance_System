@@ -236,8 +236,47 @@ async def process_scan_event(event: ScanEvent, db: AsyncSession) -> dict:
 # ---------------------------------------------------------------------------
 
 async def _find_active_session(db: AsyncSession) -> Optional[SessionORM]:
-    """Return the most recently started open session, or None."""
+    """Return the active session, preferring the manually cached session ID.
+
+    Priority:
+    1. If a session was manually activated via ``set_active_session()``, validate
+       that it is still open and return it.
+    2. If the cache is empty or the cached session is no longer valid, fall back
+       to the most recently *started* open session from the database.
+    3. Clear the cache when the cached session is found to be invalid/expired.
+    """
     now = datetime.now(tz=timezone.utc)
+
+    # ------------------------------------------------------------------
+    # Priority 1: use manually cached session if it is still open
+    # ------------------------------------------------------------------
+    if _active_session_id is not None:
+        result = await db.execute(
+            select(SessionORM).where(SessionORM.session_id == _active_session_id)
+        )
+        session = result.scalar_one_or_none()
+        if session is not None:
+            start = session.start_time
+            if not start.tzinfo:
+                start = start.replace(tzinfo=timezone.utc)
+            end = session.end_time
+            if end is not None and not end.tzinfo:
+                end = end.replace(tzinfo=timezone.utc)
+            if start <= now and (end is None or end >= now):
+                logger.debug(
+                    "Using manually cached active session: %s", _active_session_id
+                )
+                return session
+        # Cached session is missing or no longer open – clear it
+        logger.info(
+            "Cached session %s is no longer valid; clearing cache",
+            _active_session_id,
+        )
+        set_active_session(None)
+
+    # ------------------------------------------------------------------
+    # Priority 2: auto-detect most recently started open session
+    # ------------------------------------------------------------------
     result = await db.execute(
         select(SessionORM)
         .where(
@@ -249,7 +288,10 @@ async def _find_active_session(db: AsyncSession) -> Optional[SessionORM]:
         .order_by(SessionORM.start_time.desc())
         .limit(1)
     )
-    return result.scalar_one_or_none()
+    session = result.scalar_one_or_none()
+    if session is not None:
+        logger.debug("Auto-detected active session: %s", session.session_id)
+    return session
 
 
 async def get_attendance_report(session_id: int, db: AsyncSession) -> dict:
