@@ -523,9 +523,9 @@ export default function App() {
                 fontSize: 13,
               }}
             >
-              {scannerStatus == null ? "Unknown" : scannerStatus.running ? "Running" : "Stopped"}
+              {scannerStatus === null ? "Unknown" : scannerStatus.running ? "Running" : "Stopped"}
             </span>
-            {scannerStatus?.running && scannerStatus.pid != null && (
+            {scannerStatus?.running && scannerStatus.pid !== null && (
               <span style={{ color: "#475569", fontSize: 13 }}>PID: <strong>{scannerStatus.pid}</strong></span>
             )}
             {scannerStatus?.running && scannerStatus.started_at && (
@@ -533,7 +533,7 @@ export default function App() {
                 Started: <strong>{new Date(scannerStatus.started_at).toLocaleString()}</strong>
               </span>
             )}
-            {scannerStatus?.running && scannerStatus.uptime_seconds != null && (
+            {scannerStatus?.running && scannerStatus.uptime_seconds !== null && (
               <span style={{ color: "#475569", fontSize: 13 }}>
                 Uptime: <strong>{scannerStatus.uptime_seconds}s</strong>
               </span>

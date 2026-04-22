@@ -90,6 +90,7 @@ def reset_scanner_service():
                 pass
         scanner_service._process = None
         scanner_service._started_at = None
+        scanner_service._last_event_at = None
 
 
 # ---------------------------------------------------------------------------
