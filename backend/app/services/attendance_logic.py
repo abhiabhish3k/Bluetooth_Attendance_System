@@ -62,12 +62,37 @@ class ScanEvent(BaseModel):
 # ---------------------------------------------------------------------------
 _active_session_id: Optional[int] = None
 
+_ACTIVE_SESSION_KEY = "active_session_id"
+
 
 def set_active_session(session_id: Optional[int]) -> None:
-    """Set the globally active session ID."""
+    """Update the in-memory active-session cache."""
     global _active_session_id
     _active_session_id = session_id
     logger.info("Active session set to: %s", session_id)
+
+
+async def persist_active_session(session_id: Optional[int], db: AsyncSession) -> None:
+    """Persist the active session to the database and update the in-memory cache.
+
+    Calling this from API endpoints (activate, create, delete) ensures that
+    manual session switches survive backend restarts.
+    """
+    from ..models.settings import AppSettingORM
+
+    set_active_session(session_id)
+
+    value = str(session_id) if session_id is not None else None
+    result = await db.execute(
+        select(AppSettingORM).where(AppSettingORM.key == _ACTIVE_SESSION_KEY)
+    )
+    setting = result.scalar_one_or_none()
+    if setting is None:
+        db.add(AppSettingORM(key=_ACTIVE_SESSION_KEY, value=value))
+    else:
+        setting.value = value
+    await db.commit()
+    logger.info("Active session persisted to DB: %s", session_id)
 
 
 def get_active_session_id() -> Optional[int]:
@@ -236,23 +261,44 @@ async def process_scan_event(event: ScanEvent, db: AsyncSession) -> dict:
 # ---------------------------------------------------------------------------
 
 async def _find_active_session(db: AsyncSession) -> Optional[SessionORM]:
-    """Return the active session, preferring the manually cached session ID.
+    """Return the active session, preferring the manually-persisted session ID.
 
     Priority:
-    1. If a session was manually activated via ``set_active_session()``, validate
-       that it is still open and return it.
-    2. If the cache is empty or the cached session is no longer valid, fall back
-       to the most recently *started* open session from the database.
-    3. Clear the cache when the cached session is found to be invalid/expired.
+    1. If a session was manually activated via ``persist_active_session()``,
+       validate that it is still open and return it.
+       1a. If the in-memory cache is empty but a persisted value exists in the
+           database (e.g. after a backend restart), restore it first.
+    2. If the persisted session is no longer valid, fall back to the most
+       recently *started* open session from the database.
+    3. Clear the persisted value when the stored session is found invalid.
     """
+    from ..models.settings import AppSettingORM
+
     now = datetime.now(tz=timezone.utc)
 
     # ------------------------------------------------------------------
     # Priority 1: use manually cached session if it is still open
     # ------------------------------------------------------------------
-    if _active_session_id is not None:
+    active_id = _active_session_id
+
+    # 1a: cache is empty – try restoring from DB (survives backend restarts)
+    if active_id is None:
+        db_result = await db.execute(
+            select(AppSettingORM).where(AppSettingORM.key == _ACTIVE_SESSION_KEY)
+        )
+        setting = db_result.scalar_one_or_none()
+        if setting and setting.value:
+            try:
+                restored_id = int(setting.value)
+                set_active_session(restored_id)
+                active_id = restored_id
+                logger.info("Restored active session from DB: %s", restored_id)
+            except (ValueError, TypeError):
+                pass
+
+    if active_id is not None:
         result = await db.execute(
-            select(SessionORM).where(SessionORM.session_id == _active_session_id)
+            select(SessionORM).where(SessionORM.session_id == active_id)
         )
         session = result.scalar_one_or_none()
         if session is not None:
@@ -264,13 +310,13 @@ async def _find_active_session(db: AsyncSession) -> Optional[SessionORM]:
                 end = end.replace(tzinfo=timezone.utc)
             if start <= now and (end is None or end >= now):
                 logger.debug(
-                    "Using manually cached active session: %s", _active_session_id
+                    "Using manually cached active session: %s", active_id
                 )
                 return session
         # Cached session is missing or no longer open – clear it
         logger.info(
             "Cached session %s is no longer valid; clearing cache",
-            _active_session_id,
+            active_id,
         )
         set_active_session(None)
 

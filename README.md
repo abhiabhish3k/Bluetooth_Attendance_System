@@ -110,7 +110,62 @@ bluetooth-attendance-system/
 - Linux with BlueZ (Ubuntu 20.04+ recommended)
 - CMake ≥ 3.14, GCC/Clang with C++17 support
 - Python ≥ 3.10
+- Node.js ≥ 18 (for the React dashboard)
 - Bluetooth adapter (USB or built-in)
+
+---
+
+## Local Development (Backend + Dashboard)
+
+No scanner or Bluetooth hardware is needed to develop or test the backend and
+React dashboard locally.
+
+### Start the backend
+
+```bash
+# 1. Install Python dependencies
+cd backend
+pip install -r requirements.txt
+
+# 2. (Optional) Create a .env file to override defaults
+cat > .env <<'EOF'
+DATABASE_URL=sqlite+aiosqlite:///./attendance.db
+RSSI_ATTENDANCE_THRESHOLD=-75
+DEBUG=false
+PORT=8000
+EOF
+
+# 3. Run the server
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+# Interactive API docs → http://localhost:8000/docs
+```
+
+### Start the React dashboard
+
+```bash
+# In a second terminal
+cd dashboard/frontend
+npm install
+npm run dev
+# Dashboard → http://localhost:5173
+```
+
+The dashboard reads `VITE_API_URL` (defaults to `http://localhost:8000`).
+To point it at a remote backend, create `dashboard/frontend/.env`:
+
+```
+VITE_API_URL=http://<backend-host>:8000
+```
+
+### Run backend tests
+
+```bash
+cd backend
+pip install pytest pytest-asyncio anyio httpx
+pytest tests/ -v
+```
+
+---
 
 ### 2. Build the C++ Scanner
 
@@ -213,11 +268,19 @@ curl http://localhost:8000/api/attendance/report/1
 | `POST` | `/api/events/batch` | Receive multiple events |
 | `GET`  | `/api/students` | List students |
 | `POST` | `/api/students` | Register a student |
+| `PATCH`| `/api/students/{id}` | Update a student |
+| `DELETE`| `/api/students/{id}` | Delete a student |
 | `POST` | `/api/students/{id}/beacon/register` | Register beacon ID for a student |
 | `GET`  | `/api/students/{id}/beacon` | Get a student's beacon registration |
+| `GET`  | `/api/sessions` | List all sessions |
 | `POST` | `/api/sessions` | Create a session |
 | `GET`  | `/api/sessions/active` | Get active session |
-| `GET`  | `/api/attendance/report/{id}` | Get attendance report |
+| `POST` | `/api/sessions/{id}/activate` | Set active session |
+| `PATCH`| `/api/sessions/{id}` | Update session (end_time / threshold) |
+| `DELETE`| `/api/sessions/{id}` | Delete session and all its records |
+| `GET`  | `/api/attendance` | List attendance records |
+| `DELETE`| `/api/attendance/{id}` | Delete an attendance record |
+| `GET`  | `/api/attendance/report/{id}` | Get attendance report for a session |
 | `GET`  | `/health` | Health check |
 
 Full documentation: [docs/API.md](docs/API.md)
