@@ -31,7 +31,7 @@ async def app():
     from app.config import settings
     settings.database_url = TEST_DATABASE_URL
 
-    from app.main import app as fastapi_app, engine, async_session_maker, lifespan
+    from app.main import app as fastapi_app
     from app.models.student import Base
 
     # Create all tables in the in-memory DB

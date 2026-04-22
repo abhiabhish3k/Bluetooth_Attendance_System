@@ -12,7 +12,13 @@ from sqlalchemy.exc import IntegrityError
 
 from ..models.session import SessionORM, SessionCreate, SessionResponse, SessionUpdate, SessionDeleteResponse
 from ..models.attendance import AttendanceORM, ScanLogORM
-from ..services.attendance_logic import set_active_session, get_active_session_id, persist_active_session
+from ..models.settings import AppSettingORM
+from ..services.attendance_logic import (
+    set_active_session,
+    get_active_session_id,
+    persist_active_session,
+    _ACTIVE_SESSION_KEY,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -81,14 +87,12 @@ async def list_sessions(
     summary="Get the currently active session",
 )
 async def get_active_session(db: AsyncSession = Depends(get_db)):
-    from ..models.settings import AppSettingORM
-
     session_id = get_active_session_id()
 
     # If in-memory cache is empty, try restoring from DB (survives restarts)
     if session_id is None:
         db_result = await db.execute(
-            select(AppSettingORM).where(AppSettingORM.key == "active_session_id")
+            select(AppSettingORM).where(AppSettingORM.key == _ACTIVE_SESSION_KEY)
         )
         setting = db_result.scalar_one_or_none()
         if setting and setting.value:
