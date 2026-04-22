@@ -4,6 +4,7 @@ import axios from "axios";
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 const api = {
+  getHealth: () => axios.get(`${API_BASE}/health`),
   getSessions: () => axios.get(`${API_BASE}/api/sessions`),
   getActiveSession: () => axios.get(`${API_BASE}/api/sessions/active`),
   getSessionReport: (id) => axios.get(`${API_BASE}/api/attendance/report/${id}`),
@@ -23,6 +24,9 @@ const api = {
 
   listAttendance: (params) => axios.get(`${API_BASE}/api/attendance`, { params }),
   deleteAttendance: (id) => axios.delete(`${API_BASE}/api/attendance/${id}`),
+
+  sendScanEvent: (data) => axios.post(`${API_BASE}/api/events`, data),
+  sendBatchScanEvents: (data) => axios.post(`${API_BASE}/api/events/batch`, data),
 };
 
 const section = {
@@ -77,6 +81,7 @@ export default function App() {
   const [activeSession, setActiveSession] = useState(null);
   const [attendance, setAttendance] = useState([]);
   const [report, setReport] = useState(null);
+  const [backendHealth, setBackendHealth] = useState(null);
 
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [selectedSessionId, setSelectedSessionId] = useState(null);
@@ -86,6 +91,7 @@ export default function App() {
   const [attendanceStudentFilter, setAttendanceStudentFilter] = useState("");
 
   const [beaconLookup, setBeaconLookup] = useState(null);
+  const [scanResult, setScanResult] = useState(null);
   const [flash, setFlash] = useState({ type: "info", text: "" });
   const [loading, setLoading] = useState(false);
 
@@ -117,6 +123,13 @@ export default function App() {
   });
 
   const [beaconValue, setBeaconValue] = useState("");
+  const [scanEventForm, setScanEventForm] = useState({
+    address: "",
+    name: "",
+    rssi: -65,
+    beacon_id: "",
+  });
+  const [batchEventsInput, setBatchEventsInput] = useState("[]");
 
   const flashStyle = useMemo(() => {
     if (flash.type === "error") return { background: "#fee2e2", border: "1px solid #fca5a5" };
@@ -125,6 +138,7 @@ export default function App() {
   }, [flash]);
 
   const setMessage = (type, text) => setFlash({ type, text });
+  const unixTimestampNow = () => Math.floor(Date.now() / 1000);
   const toIsoDateTime = (value, label) => {
     const parsed = new Date(value);
     if (Number.isNaN(parsed.getTime())) {
@@ -147,6 +161,11 @@ export default function App() {
     setActiveSession(activeRes.data?.active ? activeRes.data.session : null);
   }, []);
 
+  const loadHealth = useCallback(async () => {
+    const res = await api.getHealth();
+    setBackendHealth(res.data);
+  }, []);
+
   const loadAttendanceList = useCallback(async () => {
     const params = {};
     if (attendanceSessionFilter) params.session_id = Number(attendanceSessionFilter);
@@ -166,32 +185,34 @@ export default function App() {
 
   const refreshAll = useCallback(async () => {
     setLoading(true);
-    try {
-      await Promise.all([loadStudents(studentSearch), loadSessions(), loadAttendanceList()]);
-      if (selectedSessionId) await loadReport(selectedSessionId);
-      setMessage("success", "Data refreshed (filters preserved).");
+      try {
+        await Promise.all([loadStudents(studentSearch), loadSessions(), loadAttendanceList(), loadHealth()]);
+        if (selectedSessionId) await loadReport(selectedSessionId);
+        setMessage("success", "Data refreshed (filters preserved).");
     } catch (e) {
       setMessage("error", e?.response?.data?.detail || "Failed to refresh data.");
     } finally {
       setLoading(false);
     }
-  }, [loadAttendanceList, loadReport, loadSessions, loadStudents, selectedSessionId, studentSearch]);
+  }, [loadAttendanceList, loadHealth, loadReport, loadSessions, loadStudents, selectedSessionId, studentSearch]);
 
   useEffect(() => {
     const run = async () => {
       setLoading(true);
       try {
-        const [studentsRes, sessionsRes, activeRes, attendanceRes] = await Promise.all([
-          api.listStudents(),
-          api.getSessions(),
-          api.getActiveSession(),
-          api.listAttendance({}),
-        ]);
+         const [studentsRes, sessionsRes, activeRes, attendanceRes, healthRes] = await Promise.all([
+           api.listStudents(),
+           api.getSessions(),
+           api.getActiveSession(),
+           api.listAttendance({}),
+           api.getHealth(),
+         ]);
         setStudents(studentsRes.data);
-        setSessions(sessionsRes.data);
-        setActiveSession(activeRes.data?.active ? activeRes.data.session : null);
-        setAttendance(attendanceRes.data);
-        setMessage("success", "Data loaded.");
+         setSessions(sessionsRes.data);
+         setActiveSession(activeRes.data?.active ? activeRes.data.session : null);
+         setAttendance(attendanceRes.data);
+         setBackendHealth(healthRes.data);
+         setMessage("success", "Data loaded.");
       } catch (e) {
         setMessage("error", e?.response?.data?.detail || "Failed to refresh data.");
       } finally {
@@ -364,6 +385,47 @@ export default function App() {
     }
   };
 
+  const handleSendScanEvent = async (e) => {
+    e.preventDefault();
+    try {
+      const rssi = Number(scanEventForm.rssi);
+      if (Number.isNaN(rssi)) throw new Error("Invalid RSSI value.");
+      const payload = {
+        address: scanEventForm.address.trim(),
+        name: scanEventForm.name.trim(),
+        rssi,
+        timestamp: unixTimestampNow(),
+      };
+      const beaconId = scanEventForm.beacon_id.trim();
+      if (beaconId) payload.beacon_id = beaconId;
+      const res = await api.sendScanEvent(payload);
+      setScanResult(res.data);
+      await loadAttendanceList();
+      if (selectedSessionId) await loadReport(selectedSessionId);
+      setMessage("success", "Scan event sent.");
+    } catch (err) {
+      setMessage("error", err?.response?.data?.detail || err?.message || "Could not send scan event.");
+    }
+  };
+
+  const handleSendBatchEvents = async () => {
+    try {
+      const parsed = JSON.parse(batchEventsInput);
+      if (!Array.isArray(parsed)) throw new Error("Batch input must be a JSON array.");
+      const payload = parsed.map((event) => ({
+        ...event,
+        timestamp: event?.timestamp ?? unixTimestampNow(),
+      }));
+      const res = await api.sendBatchScanEvents(payload);
+      setScanResult(res.data);
+      await loadAttendanceList();
+      if (selectedSessionId) await loadReport(selectedSessionId);
+      setMessage("success", "Batch scan events sent.");
+    } catch (err) {
+      setMessage("error", err?.response?.data?.detail || err?.message || "Could not send batch scan events.");
+    }
+  };
+
   const selectedSession = sessions.find((s) => s.session_id === Number(selectedSessionId));
 
   return (
@@ -387,6 +449,44 @@ export default function App() {
           <strong>Current Active Session:</strong>{" "}
           {activeSession ? `${activeSession.class_name} (#${activeSession.session_id})` : "None"}
         </div>
+
+        <section style={section}>
+          <h2 style={{ marginTop: 0 }}>Backend & Scanner Events</h2>
+          <p style={{ marginTop: 0, color: "#475569" }}>
+            Backend:{" "}
+            {backendHealth?.status ? (
+              <>
+                <strong>{backendHealth.status}</strong> · {backendHealth.app} v{backendHealth.version}
+              </>
+            ) : (
+              "Unavailable"
+            )}
+          </p>
+          <form onSubmit={handleSendScanEvent} style={{ display: "grid", gridTemplateColumns: "repeat(5,minmax(0,1fr))", gap: 8 }}>
+            <input aria-label="Scan event MAC address" style={input} placeholder="MAC XX:XX:..." value={scanEventForm.address} onChange={(e) => setScanEventForm({ ...scanEventForm, address: e.target.value })} required />
+            <input aria-label="Scan event device name" style={input} placeholder="Device name" value={scanEventForm.name} onChange={(e) => setScanEventForm({ ...scanEventForm, name: e.target.value })} />
+            <input aria-label="Scan event RSSI" style={input} type="number" placeholder="RSSI" value={scanEventForm.rssi} onChange={(e) => setScanEventForm({ ...scanEventForm, rssi: e.target.value })} required />
+            <input aria-label="Scan event beacon ID" style={input} placeholder="beacon_id (optional)" value={scanEventForm.beacon_id} onChange={(e) => setScanEventForm({ ...scanEventForm, beacon_id: e.target.value })} />
+            <button style={btn} type="submit">Send Scan Event</button>
+          </form>
+          <div style={{ marginTop: 8, display: "grid", gap: 8 }}>
+            <textarea
+              aria-label="Batch scan events JSON"
+              style={{ ...input, minHeight: 96, fontFamily: "monospace" }}
+              value={batchEventsInput}
+              onChange={(e) => setBatchEventsInput(e.target.value)}
+              placeholder='[{"address":"AA:BB:CC:DD:EE:FF","rssi":-62,"name":"phone","beacon_id":"1:1001"}]'
+            />
+            <div>
+              <button style={btn} type="button" onClick={handleSendBatchEvents}>Send Batch Events</button>
+            </div>
+            {scanResult && (
+              <pre style={{ margin: 0, background: "#0f172a", color: "#e2e8f0", borderRadius: 8, padding: 10, overflow: "auto" }}>
+                {JSON.stringify(scanResult, null, 2)}
+              </pre>
+            )}
+          </div>
+        </section>
 
         <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 14 }}>
           <section style={section}>
