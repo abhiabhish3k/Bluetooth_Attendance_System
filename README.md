@@ -257,6 +257,40 @@ curl http://localhost:8000/api/attendance/report/1
 | `RSSI_ATTENDANCE_THRESHOLD` | `-75` | Minimum RSSI to mark attendance |
 | `DEBUG` | `false` | Enable debug mode |
 | `PORT` | `8000` | Server port |
+| `SCANNER_COMMAND` | `./scanner/build/bin/ble_scanner` | Path or command used to launch the C++ scanner engine |
+| `SCANNER_ARGS` | _(empty)_ | Space-separated extra arguments passed to the scanner command |
+
+---
+
+## Scanner Control (Admin Panel)
+
+The admin panel exposes a **Scanner Control** section that lets you start, stop,
+and restart the C++ scanner engine directly from the browser UI.
+
+### New API endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET`  | `/api/scanner/status` | Get scanner runtime status (running, pid, uptime, last event) |
+| `POST` | `/api/scanner/start`  | Start the C++ scanner engine (idempotent) |
+| `POST` | `/api/scanner/stop`   | Stop the C++ scanner engine (idempotent) |
+| `POST` | `/api/scanner/restart`| Stop then start the scanner |
+
+### Configuration
+
+Set the scanner executable path (and optional extra args) via environment variables
+or in your `.env` file:
+
+```bash
+# Path to the compiled C++ scanner binary
+SCANNER_COMMAND=./scanner/build/bin/ble_scanner
+
+# Optional extra arguments (space-separated)
+SCANNER_ARGS=--config /path/to/config.json
+```
+
+The backend will spawn this command as a child process when `/api/scanner/start`
+is called.  If the binary is not found, the endpoint returns `503 Service Unavailable`.
 
 ---
 
@@ -266,6 +300,10 @@ curl http://localhost:8000/api/attendance/report/1
 |--------|----------|-------------|
 | `POST` | `/api/events` | Receive a BLE scan event |
 | `POST` | `/api/events/batch` | Receive multiple events |
+| `GET`  | `/api/scanner/status` | Get scanner engine runtime status |
+| `POST` | `/api/scanner/start` | Start the C++ scanner engine |
+| `POST` | `/api/scanner/stop` | Stop the C++ scanner engine |
+| `POST` | `/api/scanner/restart` | Restart the C++ scanner engine |
 | `GET`  | `/api/students` | List students |
 | `POST` | `/api/students` | Register a student |
 | `PATCH`| `/api/students/{id}` | Update a student |
