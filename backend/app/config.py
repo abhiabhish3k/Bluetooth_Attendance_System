@@ -32,6 +32,16 @@ class Settings(BaseSettings):
         description="Seconds after session end_time during which scans still count",
     )
 
+    # Scanner engine
+    scanner_command: str = Field(
+        default="./scanner/build/bin/ble_scanner",
+        description="Path or command used to launch the C++ BLE scanner engine",
+    )
+    scanner_args: str = Field(
+        default="",
+        description="Space-separated extra arguments passed to the scanner command",
+    )
+
     # Logging
     log_level: str = "INFO"
 

@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..services.attendance_logic import ScanEvent, process_scan_event
+from ..services.scanner_control import scanner_service
 from ..utils.validators import validate_scan_event
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,7 @@ async def receive_scan_event(
                             detail=str(exc)) from exc
 
     result = await process_scan_event(event, db)
+    scanner_service.update_last_event()
     return result
 
 
@@ -84,4 +86,5 @@ async def receive_batch_events(
             logger.warning("Error processing event %s: %s", payload, exc)
             results.append({"status": "error", "reason": "processing_failed"})
 
+    scanner_service.update_last_event()
     return {"processed": len(results), "results": results}

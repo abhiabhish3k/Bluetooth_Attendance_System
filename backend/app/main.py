@@ -80,11 +80,13 @@ app.add_middleware(
 # Routers
 # ---------------------------------------------------------------------------
 from .api.scanner import router as scanner_router
+from .api.scanner_control import router as scanner_control_router
 from .api.attendance import router as attendance_router
 from .api.students import router as students_router
 from .api.sessions import router as sessions_router
 
 app.include_router(scanner_router)
+app.include_router(scanner_control_router)
 app.include_router(attendance_router)
 app.include_router(students_router)
 app.include_router(sessions_router)

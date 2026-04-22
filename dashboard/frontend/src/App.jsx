@@ -27,6 +27,11 @@ const api = {
 
   sendScanEvent: (data) => axios.post(`${API_BASE}/api/events`, data),
   sendBatchScanEvents: (data) => axios.post(`${API_BASE}/api/events/batch`, data),
+
+  getScannerStatus: () => axios.get(`${API_BASE}/api/scanner/status`),
+  startScanner: () => axios.post(`${API_BASE}/api/scanner/start`),
+  stopScanner: () => axios.post(`${API_BASE}/api/scanner/stop`),
+  restartScanner: () => axios.post(`${API_BASE}/api/scanner/restart`),
 };
 
 /**
@@ -150,6 +155,9 @@ export default function App() {
   });
   const [batchEventsInput, setBatchEventsInput] = useState("[]");
 
+  const [scannerStatus, setScannerStatus] = useState(null);
+  const [scannerLoading, setScannerLoading] = useState(false);
+
   const flashStyle = useMemo(() => {
     if (flash.type === "error") return { background: "#fee2e2", border: "1px solid #fca5a5" };
     if (flash.type === "success") return { background: "#dcfce7", border: "1px solid #86efac" };
@@ -183,6 +191,15 @@ export default function App() {
   const loadHealth = useCallback(async () => {
     const res = await api.getHealth();
     setBackendHealth(res.data);
+  }, []);
+
+  const loadScannerStatus = useCallback(async () => {
+    try {
+      const res = await api.getScannerStatus();
+      setScannerStatus(res.data);
+    } catch {
+      // backend may not be reachable; keep last known status
+    }
   }, []);
 
   const loadAttendanceList = useCallback(async () => {
@@ -240,6 +257,13 @@ export default function App() {
     };
     run();
   }, []);
+
+  // Poll scanner status every 7 seconds
+  useEffect(() => {
+    loadScannerStatus();
+    const interval = setInterval(loadScannerStatus, 7000);
+    return () => clearInterval(interval);
+  }, [loadScannerStatus]);
 
   useEffect(() => {
     if (selectedStudent) {
@@ -445,6 +469,23 @@ export default function App() {
     }
   };
 
+  const handleScannerAction = async (action) => {
+    setScannerLoading(true);
+    try {
+      let res;
+      if (action === "start") res = await api.startScanner();
+      else if (action === "stop") res = await api.stopScanner();
+      else res = await api.restartScanner();
+      setScannerStatus(res.data);
+      setMessage("success", `Scanner ${action} successful.`);
+    } catch (err) {
+      setMessage("error", formatApiError(err?.response?.data?.detail) || `Could not ${action} scanner.`);
+    } finally {
+      setScannerLoading(false);
+      await loadScannerStatus();
+    }
+  };
+
   const selectedSession = sessions.find((s) => s.session_id === Number(selectedSessionId));
 
   return (
@@ -468,6 +509,74 @@ export default function App() {
           <strong>Current Active Session:</strong>{" "}
           {activeSession ? `${activeSession.class_name} (#${activeSession.session_id})` : "None"}
         </div>
+
+        <section style={section}>
+          <h2 style={{ marginTop: 0 }}>Scanner Control</h2>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <span
+              style={{
+                background: scannerStatus?.running ? "#16a34a" : "#94a3b8",
+                color: "#fff",
+                padding: "3px 12px",
+                borderRadius: 999,
+                fontWeight: 700,
+                fontSize: 13,
+              }}
+            >
+              {scannerStatus == null ? "Unknown" : scannerStatus.running ? "Running" : "Stopped"}
+            </span>
+            {scannerStatus?.running && scannerStatus.pid != null && (
+              <span style={{ color: "#475569", fontSize: 13 }}>PID: <strong>{scannerStatus.pid}</strong></span>
+            )}
+            {scannerStatus?.running && scannerStatus.started_at && (
+              <span style={{ color: "#475569", fontSize: 13 }}>
+                Started: <strong>{new Date(scannerStatus.started_at).toLocaleString()}</strong>
+              </span>
+            )}
+            {scannerStatus?.running && scannerStatus.uptime_seconds != null && (
+              <span style={{ color: "#475569", fontSize: 13 }}>
+                Uptime: <strong>{scannerStatus.uptime_seconds}s</strong>
+              </span>
+            )}
+            {scannerStatus?.last_event_at && (
+              <span style={{ color: "#475569", fontSize: 13 }}>
+                Last event: <strong>{new Date(scannerStatus.last_event_at).toLocaleString()}</strong>
+              </span>
+            )}
+          </div>
+          {scannerStatus?.engine && (
+            <p style={{ margin: "6px 0 0", color: "#64748b", fontSize: 12 }}>
+              Engine: <code>{scannerStatus.engine.command}</code>
+              {scannerStatus.engine.args ? <> · args: <code>{scannerStatus.engine.args}</code></> : null}
+            </p>
+          )}
+          <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+            <button
+              style={{ ...btn, background: "#dcfce7", borderColor: "#86efac" }}
+              onClick={() => handleScannerAction("start")}
+              disabled={scannerLoading || scannerStatus?.running}
+            >
+              Start
+            </button>
+            <button
+              style={{ ...btn, background: "#fee2e2", borderColor: "#fca5a5" }}
+              onClick={() => handleScannerAction("stop")}
+              disabled={scannerLoading || !scannerStatus?.running}
+            >
+              Stop
+            </button>
+            <button
+              style={btn}
+              onClick={() => handleScannerAction("restart")}
+              disabled={scannerLoading}
+            >
+              Restart
+            </button>
+            <button style={btn} onClick={loadScannerStatus} disabled={scannerLoading}>
+              Refresh Status
+            </button>
+          </div>
+        </section>
 
         <section style={section}>
           <h2 style={{ marginTop: 0 }}>Backend & Scanner Events</h2>
