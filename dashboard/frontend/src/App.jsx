@@ -29,6 +29,25 @@ const api = {
   sendBatchScanEvents: (data) => axios.post(`${API_BASE}/api/events/batch`, data),
 };
 
+/**
+ * Convert a FastAPI/Pydantic error detail value to a human-readable string.
+ *
+ * FastAPI 422 responses send `detail` as an array of objects like:
+ *   [{type, loc, msg, input, ctx}, ...]
+ * Passing that array directly to React JSX renders crashes with
+ * "Objects are not valid as a React child".  This helper always returns
+ * a plain string so the flash banner can render safely.
+ */
+function formatApiError(detail) {
+  if (!detail) return null;
+  if (Array.isArray(detail)) {
+    return detail.map((e) => e.msg || JSON.stringify(e)).join("; ");
+  }
+  if (typeof detail === "string") return detail;
+  if (typeof detail === "object") return JSON.stringify(detail);
+  return String(detail);
+}
+
 const section = {
   background: "#fff",
   border: "1px solid #e2e8f0",
@@ -190,7 +209,7 @@ export default function App() {
         if (selectedSessionId) await loadReport(selectedSessionId);
         setMessage("success", "Data refreshed (filters preserved).");
     } catch (e) {
-      setMessage("error", e?.response?.data?.detail || "Failed to refresh data.");
+      setMessage("error", formatApiError(e?.response?.data?.detail) || "Failed to refresh data.");
     } finally {
       setLoading(false);
     }
@@ -214,7 +233,7 @@ export default function App() {
          setBackendHealth(healthRes.data);
          setMessage("success", "Data loaded.");
       } catch (e) {
-        setMessage("error", e?.response?.data?.detail || "Failed to refresh data.");
+        setMessage("error", formatApiError(e?.response?.data?.detail) || "Failed to refresh data.");
       } finally {
         setLoading(false);
       }
@@ -244,7 +263,7 @@ export default function App() {
       await loadStudents(studentSearch);
       setMessage("success", "Student created.");
     } catch (err) {
-      setMessage("error", err?.response?.data?.detail || "Could not create student.");
+      setMessage("error", formatApiError(err?.response?.data?.detail) || "Could not create student.");
     }
   };
 
@@ -261,7 +280,7 @@ export default function App() {
       await loadStudents(studentSearch);
       setMessage("success", `Student #${selectedStudent.id} updated.`);
     } catch (err) {
-      setMessage("error", err?.response?.data?.detail || "Could not update student.");
+      setMessage("error", formatApiError(err?.response?.data?.detail) || "Could not update student.");
     }
   };
 
@@ -275,7 +294,7 @@ export default function App() {
       await Promise.all([loadStudents(studentSearch), loadAttendanceList()]);
       setMessage("success", "Student deleted.");
     } catch (err) {
-      setMessage("error", err?.response?.data?.detail || "Could not delete student.");
+      setMessage("error", formatApiError(err?.response?.data?.detail) || "Could not delete student.");
     }
   };
 
@@ -286,7 +305,7 @@ export default function App() {
       await loadStudents(studentSearch);
       setMessage("success", "Beacon registered.");
     } catch (err) {
-      setMessage("error", err?.response?.data?.detail || "Could not register beacon.");
+      setMessage("error", formatApiError(err?.response?.data?.detail) || "Could not register beacon.");
     }
   };
 
@@ -298,7 +317,7 @@ export default function App() {
       setMessage("success", "Beacon details loaded.");
     } catch (err) {
       setBeaconLookup(null);
-      setMessage("error", err?.response?.data?.detail || "No beacon registered.");
+      setMessage("error", formatApiError(err?.response?.data?.detail) || "No beacon registered.");
     }
   };
 
@@ -318,7 +337,7 @@ export default function App() {
       await loadSessions();
       setMessage("success", "Session created.");
     } catch (err) {
-      setMessage("error", err?.response?.data?.detail || err?.message || "Could not create session.");
+      setMessage("error", formatApiError(err?.response?.data?.detail) || err?.message || "Could not create session.");
     }
   };
 
@@ -329,7 +348,7 @@ export default function App() {
       await loadSessions();
       setMessage("success", `Session #${selectedSessionId} activated.`);
     } catch (err) {
-      setMessage("error", err?.response?.data?.detail || "Could not activate session.");
+      setMessage("error", formatApiError(err?.response?.data?.detail) || "Could not activate session.");
     }
   };
 
@@ -355,7 +374,7 @@ export default function App() {
       await Promise.all([loadSessions(), loadReport(selectedSessionId)]);
       setMessage("success", `Session #${selectedSessionId} updated.`);
     } catch (err) {
-      setMessage("error", err?.response?.data?.detail || "Could not update session.");
+      setMessage("error", formatApiError(err?.response?.data?.detail) || "Could not update session.");
     }
   };
 
@@ -369,7 +388,7 @@ export default function App() {
       await Promise.all([loadSessions(), loadAttendanceList()]);
       setMessage("success", "Session deleted.");
     } catch (err) {
-      setMessage("error", err?.response?.data?.detail || "Could not delete session.");
+      setMessage("error", formatApiError(err?.response?.data?.detail) || "Could not delete session.");
     }
   };
 
@@ -381,7 +400,7 @@ export default function App() {
       if (selectedSessionId) await loadReport(selectedSessionId);
       setMessage("success", "Attendance record deleted.");
     } catch (err) {
-      setMessage("error", err?.response?.data?.detail || "Could not delete attendance record.");
+      setMessage("error", formatApiError(err?.response?.data?.detail) || "Could not delete attendance record.");
     }
   };
 
@@ -404,7 +423,7 @@ export default function App() {
       if (selectedSessionId) await loadReport(selectedSessionId);
       setMessage("success", "Scan event sent.");
     } catch (err) {
-      setMessage("error", err?.response?.data?.detail || err?.message || "Could not send scan event.");
+      setMessage("error", formatApiError(err?.response?.data?.detail) || err?.message || "Could not send scan event.");
     }
   };
 
@@ -422,7 +441,7 @@ export default function App() {
       if (selectedSessionId) await loadReport(selectedSessionId);
       setMessage("success", "Batch scan events sent.");
     } catch (err) {
-      setMessage("error", err?.response?.data?.detail || err?.message || "Could not send batch scan events.");
+      setMessage("error", formatApiError(err?.response?.data?.detail) || err?.message || "Could not send batch scan events.");
     }
   };
 

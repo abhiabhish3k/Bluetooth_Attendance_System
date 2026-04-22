@@ -12,7 +12,13 @@ from sqlalchemy.exc import IntegrityError
 
 from ..models.session import SessionORM, SessionCreate, SessionResponse, SessionUpdate, SessionDeleteResponse
 from ..models.attendance import AttendanceORM, ScanLogORM
-from ..services.attendance_logic import set_active_session, get_active_session_id
+from ..models.settings import AppSettingORM
+from ..services.attendance_logic import (
+    set_active_session,
+    get_active_session_id,
+    persist_active_session,
+    _ACTIVE_SESSION_KEY,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +63,7 @@ async def create_session(
     if not start.tzinfo:
         start = start.replace(tzinfo=timezone.utc)
     if abs((start - now).total_seconds()) <= 6000:
-        set_active_session(new_session.session_id)
+        await persist_active_session(new_session.session_id, db)
 
     return new_session
 
@@ -82,6 +88,20 @@ async def list_sessions(
 )
 async def get_active_session(db: AsyncSession = Depends(get_db)):
     session_id = get_active_session_id()
+
+    # If in-memory cache is empty, try restoring from DB (survives restarts)
+    if session_id is None:
+        db_result = await db.execute(
+            select(AppSettingORM).where(AppSettingORM.key == _ACTIVE_SESSION_KEY)
+        )
+        setting = db_result.scalar_one_or_none()
+        if setting and setting.value:
+            try:
+                session_id = int(setting.value)
+                set_active_session(session_id)
+            except (ValueError, TypeError):
+                session_id = None
+
     if session_id is None:
         return {"active": False, "session": None}
 
@@ -164,7 +184,7 @@ async def activate_session(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Session {session_id} not found",
         )
-    set_active_session(session_id)
+    await persist_active_session(session_id, db)
     return {"message": f"Session {session_id} activated", "session_id": session_id}
 
 
@@ -213,7 +233,7 @@ async def delete_session(
 
     # Clear active session cache if the deleted session was active
     if get_active_session_id() == session_id:
-        set_active_session(None)
+        await persist_active_session(None, db)
         logger.info("Cleared active session cache (deleted session %s was active)", session_id)
 
     logger.info(
