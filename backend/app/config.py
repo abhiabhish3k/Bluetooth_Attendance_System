@@ -4,8 +4,8 @@ Application configuration – reads from environment variables or a .env file.
 
 from pathlib import Path
 
+from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings
-from pydantic import Field
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -53,6 +53,16 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = False
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def scanner_backend_url(self) -> str:
+        """URL where the stdout-reader thread POSTs BLE scan events.
+
+        Derived from ``port`` so it stays consistent when the port is
+        overridden via environment variable or .env file.
+        """
+        return f"http://127.0.0.1:{self.port}/api/events"
 
 
 settings = Settings()
