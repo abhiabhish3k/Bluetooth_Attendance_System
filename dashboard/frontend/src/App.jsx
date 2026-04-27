@@ -580,6 +580,9 @@ export default function App() {
 
         <section style={section}>
           <h2 style={{ marginTop: 0 }}>Backend & Scanner Events</h2>
+          <p style={{ marginTop: 0, marginBottom: 8, color: "#64748b", fontSize: 13 }}>
+            Use this panel to manually test event ingestion without BLE hardware. If you remove it, attendance still works with live scanner input, but manual API testing from the dashboard is no longer available.
+          </p>
           <p style={{ marginTop: 0, color: "#475569" }}>
             Backend:{" "}
             {backendHealth?.status ? (

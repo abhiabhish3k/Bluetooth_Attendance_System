@@ -2,8 +2,12 @@
 Application configuration – reads from environment variables or a .env file.
 """
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
 from pydantic import Field
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
@@ -34,11 +38,11 @@ class Settings(BaseSettings):
 
     # Scanner engine
     scanner_command: str = Field(
-        default="./scanner/build/bin/ble_scanner",
+        default=str(REPO_ROOT / "scanner" / "build" / "bin" / "ble_scanner"),
         description="Path or command used to launch the C++ BLE scanner engine",
     )
     scanner_args: str = Field(
-        default="",
+        default=str(REPO_ROOT / "scanner" / "config.json"),
         description="Space-separated extra arguments passed to the scanner command",
     )
 

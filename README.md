@@ -120,6 +120,25 @@ bluetooth-attendance-system/
 No scanner or Bluetooth hardware is needed to develop or test the backend and
 React dashboard locally.
 
+### One command to run everything (backend + frontend + scanner)
+
+```bash
+bash scripts/run_all.sh
+```
+
+What it does:
+- Activates `.venv` automatically (if present)
+- Starts backend (`uvicorn`)
+- Starts frontend (`npm run dev`)
+- Starts scanner bridge (`scripts/run_scanner.sh`) unless `SCANNER_ENABLED=0`
+
+Optional:
+
+```bash
+# Skip scanner process
+SCANNER_ENABLED=0 bash scripts/run_all.sh
+```
+
 ### Start the backend
 
 ```bash
@@ -283,10 +302,10 @@ or in your `.env` file:
 
 ```bash
 # Path to the compiled C++ scanner binary
-SCANNER_COMMAND=./scanner/build/bin/ble_scanner
+SCANNER_COMMAND=/absolute/path/to/Bluetooth_Attendance_System/scanner/build/bin/ble_scanner
 
 # Optional extra arguments (space-separated)
-SCANNER_ARGS=--config /path/to/config.json
+SCANNER_ARGS=/absolute/path/to/Bluetooth_Attendance_System/scanner/config.json
 ```
 
 The backend will spawn this command as a child process when `/api/scanner/start`
