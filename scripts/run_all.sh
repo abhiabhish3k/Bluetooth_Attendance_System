@@ -7,18 +7,35 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-VENV_DIR="${VENV_DIR:-$REPO_ROOT/.venv}"
 BACKEND_HOST="${BACKEND_HOST:-0.0.0.0}"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 SCANNER_ENABLED="${SCANNER_ENABLED:-1}"
 
-if [[ -f "$VENV_DIR/bin/activate" ]]; then
-  # shellcheck source=/dev/null
-  source "$VENV_DIR/bin/activate"
-  echo "==> Activated virtual environment: $VENV_DIR"
-else
-  echo "==> No virtual environment found at $VENV_DIR (continuing with system Python)"
+# Resolve candidate venv locations: repo-local first, then two levels up (user root)
+_PARENT_DIR="$(cd "$REPO_ROOT/../.." 2>/dev/null && pwd 2>/dev/null)"
+VENV_CANDIDATES=(
+  "${VENV_DIR:-$REPO_ROOT/.venv}"
+)
+# Only add the parent candidate if it resolves to a real non-root directory
+if [[ -n "$_PARENT_DIR" && ! "$_PARENT_DIR" =~ ^/+$ ]]; then
+  VENV_CANDIDATES+=("$_PARENT_DIR/.venv")
 fi
+unset _PARENT_DIR
+
+PYTHON="python3"
+for _candidate in "${VENV_CANDIDATES[@]}"; do
+  if [[ -f "$_candidate/bin/activate" && -f "$_candidate/bin/python" ]]; then
+    # shellcheck source=/dev/null
+    source "$_candidate/bin/activate"
+    PYTHON="$_candidate/bin/python"
+    echo "==> Activated virtual environment: $_candidate"
+    break
+  fi
+done
+if [[ "$PYTHON" == "python3" ]]; then
+  echo "==> No virtual environment found; using system Python"
+fi
+unset _candidate
 
 PIDS=()
 
@@ -37,7 +54,7 @@ trap cleanup EXIT INT TERM
 echo "==> Starting backend on http://localhost:$BACKEND_PORT ..."
 (
   cd "$REPO_ROOT/backend"
-  exec uvicorn app.main:app --reload --host "$BACKEND_HOST" --port "$BACKEND_PORT"
+  exec "$PYTHON" -m uvicorn app.main:app --reload --host "$BACKEND_HOST" --port "$BACKEND_PORT"
 ) &
 PIDS+=($!)
 
