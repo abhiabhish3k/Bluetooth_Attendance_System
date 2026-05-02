@@ -14,6 +14,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from .bluetooth_recovery import get_adapter_info
+
 
 # ---------------------------------------------------------------------------
 # Bluetooth / BlueZ helpers
@@ -172,6 +174,7 @@ def build_diagnostics() -> dict[str, Any]:
 
     Aggregates Bluetooth adapter info, D-Bus availability, BlueZ service
     status, scanner binary checks, and configuration warnings from Settings.
+    Includes per-adapter power state and recovery hints.
     """
     from ..config import settings
 
@@ -185,22 +188,43 @@ def build_diagnostics() -> dict[str, Any]:
 
     config_warnings = settings.validate_startup()
 
+    # Detailed power-state check for the configured adapter
+    adapter_detail = get_adapter_info(settings.bt_adapter)
+
+    # Derive extra warnings from adapter state
+    bt_warnings: list[str] = []
+    if not adapter_detail["exists"]:
+        bt_warnings.append(
+            f"Adapter '{settings.bt_adapter}' not found in sysfs. "
+            "Check: hciconfig -a"
+        )
+    elif adapter_detail["powered"] is False:
+        bt_warnings.append(
+            f"Adapter '{settings.bt_adapter}' exists but is NOT powered on. "
+            f"Fix: sudo hciconfig {settings.bt_adapter} up  "
+            f"or run: bash scripts/enable_bluetooth.sh"
+        )
+
     overall_ok = (
         binary["executable"]
         and dbus["available"]
         and (bluetooth_svc["active"] is not False)
         and len(adapters) > 0
+        and adapter_detail.get("powered") is True
         and not config_warnings
+        and not bt_warnings
     )
 
     return {
         "overall_ok": overall_ok,
         "bluetooth_adapters": adapters,
+        "adapter_detail": adapter_detail,
         "dbus": dbus,
         "bluetooth_service": bluetooth_svc,
         "scanner_binary": binary,
         "scanner_config": config_file,
         "config_warnings": config_warnings,
+        "bluetooth_warnings": bt_warnings,
         "settings": {
             "scanner_command": settings.scanner_command,
             "scanner_args": settings.scanner_args,

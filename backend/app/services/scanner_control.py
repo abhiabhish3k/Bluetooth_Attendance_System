@@ -31,6 +31,7 @@ from typing import Optional
 import httpx
 
 from ..config import settings
+from ..utils.bluetooth_recovery import attempt_recovery, get_adapter_info
 
 logger = logging.getLogger(__name__)
 
@@ -226,16 +227,96 @@ class ScannerControlService:
             with self._lock:
                 self._last_exit_code = exit_code
             if exit_code is not None and exit_code != 0:
+                adapter = settings.bt_adapter
                 logger.error(
                     "Scanner process exited with code %d – check stderr output above "
-                    "for the root cause (Bluetooth adapter missing? D-Bus permissions?)",
+                    "for the root cause (Bluetooth adapter missing? D-Bus permissions?)\n"
+                    "  Common fixes:\n"
+                    "    1. Power on the adapter:  sudo hciconfig %s up\n"
+                    "       or run:                bash scripts/enable_bluetooth.sh\n"
+                    "    2. Check BlueZ is running: sudo systemctl status bluetooth\n"
+                    "    3. Restart BlueZ:          sudo systemctl restart bluetooth\n"
+                    "    4. Add user to group:      sudo usermod -aG bluetooth $USER  (re-login required)\n"
+                    "    5. Run diagnostics:        GET /api/health/diagnostics",
                     exit_code,
+                    adapter,
                 )
             else:
                 logger.info(
                     "Scanner stdout reader exited (exit_code=%s)",
                     exit_code,
                 )
+
+    # ------------------------------------------------------------------
+    # Bluetooth pre-flight helpers
+    # ------------------------------------------------------------------
+
+    def _preflight_bluetooth(self) -> dict:
+        """Check Bluetooth adapter state and attempt recovery if needed.
+
+        Returns a dict with:
+        - ``ok``: bool – True if adapter is ready (or recovery succeeded)
+        - ``recovery``: dict from :func:`attempt_recovery`
+        - ``adapter_info``: dict from :func:`get_adapter_info`
+        - ``detail``: human-readable summary
+        """
+        adapter = settings.bt_adapter
+        adapter_info = get_adapter_info(adapter)
+
+        if not adapter_info["exists"]:
+            logger.error(
+                "Pre-flight: Bluetooth adapter '%s' not found in sysfs.\n"
+                "  Check available adapters: hciconfig -a  or  ls /sys/class/bluetooth/\n"
+                "  If using a different adapter name set BT_ADAPTER env variable.",
+                adapter,
+            )
+            return {
+                "ok": False,
+                "recovery": None,
+                "adapter_info": adapter_info,
+                "detail": adapter_info["detail"],
+            }
+
+        if adapter_info["powered"] is True:
+            logger.info(
+                "Pre-flight: Bluetooth adapter '%s' is powered on and ready", adapter
+            )
+            return {
+                "ok": True,
+                "recovery": None,
+                "adapter_info": adapter_info,
+                "detail": f"Adapter '{adapter}' is ready",
+            }
+
+        # Adapter exists but is not powered – attempt auto-recovery
+        logger.warning(
+            "Pre-flight: Bluetooth adapter '%s' is NOT powered on – attempting recovery",
+            adapter,
+        )
+        recovery = attempt_recovery(adapter)
+        if recovery["success"]:
+            logger.info("Pre-flight: Recovery succeeded – adapter '%s' is now ready", adapter)
+            return {
+                "ok": True,
+                "recovery": recovery,
+                "adapter_info": get_adapter_info(adapter),
+                "detail": recovery["detail"],
+            }
+
+        logger.error(
+            "Pre-flight: Could not power on Bluetooth adapter '%s'.\n"
+            "  Run the helper script to fix this:  bash scripts/enable_bluetooth.sh\n"
+            "  Or manually:  sudo hciconfig %s up\n"
+            "  Scanner will be started anyway but may fail with 'Resource Not Ready'.",
+            adapter,
+            adapter,
+        )
+        return {
+            "ok": False,
+            "recovery": recovery,
+            "adapter_info": get_adapter_info(adapter),
+            "detail": recovery["detail"],
+        }
 
     # ------------------------------------------------------------------
     # Public API
@@ -251,12 +332,30 @@ class ScannerControlService:
         Start the scanner engine.  Idempotent: if already running, returns
         the current status with ``already_running=True``.
 
+        Performs a Bluetooth adapter pre-flight check before launching the
+        scanner.  If the adapter is not powered, an automatic recovery is
+        attempted (``sudo hciconfig <adapter> up``).  The scanner is still
+        launched even when recovery fails so that the caller can see the
+        resulting error in the logs.
+
         Two daemon threads are spawned:
         - ``_read_stdout``: reads JSON events and POSTs them to /api/events.
         - ``_read_stderr``: drains stderr and logs output at WARNING level.
         """
         with self._lock:
             if self._is_running():
+                return {**self._status_unlocked(), "already_running": True}
+
+            # -- Bluetooth pre-flight check (runs outside the lock to allow
+            #    power-on commands that may take several seconds) ---------
+            # Release the lock temporarily so we don't block status queries
+            # during the potentially slow adapter power-on.
+        preflight = self._preflight_bluetooth()
+
+        with self._lock:
+            if self._is_running():
+                # Another caller started the scanner while we were doing
+                # the pre-flight check.
                 return {**self._status_unlocked(), "already_running": True}
 
             cmd = self._build_cmd()
@@ -312,7 +411,9 @@ class ScannerControlService:
             )
             self._stderr_thread.start()
 
-            return {**self._status_unlocked(), "already_running": False}
+            result = {**self._status_unlocked(), "already_running": False}
+            result["preflight"] = preflight
+            return result
 
     def stop(self) -> dict:
         """

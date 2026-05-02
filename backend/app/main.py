@@ -52,6 +52,26 @@ async def lifespan(app: FastAPI):
     if not warnings:
         logger.info("Startup check: all configuration checks passed")
 
+    # Startup: log Bluetooth adapter status
+    from .utils.bluetooth_recovery import get_adapter_info
+    adapter_info = get_adapter_info(settings.bt_adapter)
+    if adapter_info["exists"] and adapter_info["powered"] is True:
+        logger.info("Bluetooth: %s", adapter_info["detail"])
+    elif adapter_info["exists"] and adapter_info["powered"] is False:
+        logger.warning(
+            "Bluetooth: %s – scanner will fail with 'Resource Not Ready' until fixed.\n"
+            "  Quick fix: sudo hciconfig %s up  or  bash scripts/enable_bluetooth.sh",
+            adapter_info["detail"],
+            settings.bt_adapter,
+        )
+    elif not adapter_info["exists"]:
+        logger.warning(
+            "Bluetooth: %s – scanner cannot start without a Bluetooth adapter.",
+            adapter_info["detail"],
+        )
+    else:
+        logger.info("Bluetooth adapter '%s': power state unknown", settings.bt_adapter)
+
     # Startup: create all tables
     async with engine.begin() as conn:
         await conn.run_sync(StudentBase.metadata.create_all)
