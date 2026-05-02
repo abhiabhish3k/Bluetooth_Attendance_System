@@ -28,11 +28,33 @@ def validate_rssi(rssi: int) -> bool:
     return MIN_RSSI <= rssi <= MAX_RSSI
 
 
+_MIN_TS_S = 1_577_836_800   # 2020-01-01T00:00:00Z in seconds
+_MAX_TS_S = 4_102_444_800   # 2100-01-01T00:00:00Z in seconds
+_MS_THRESHOLD = _MIN_TS_S * 1_000  # timestamps >= this are treated as milliseconds
+
+
+def normalise_timestamp(ts: int) -> int:
+    """Return ts as Unix seconds, converting from milliseconds if necessary.
+
+    The ESP32 (and some other embedded scanners) may send Unix milliseconds
+    instead of seconds.  A value >= 2020-01-01 in milliseconds (~1.58 × 10¹²)
+    is well above the maximum plausible Unix-second value (~4.1 × 10⁹), so
+    the conversion is unambiguous.
+    """
+    if ts >= _MS_THRESHOLD:
+        return ts // 1_000
+    return ts
+
+
 def validate_timestamp(ts: int) -> bool:
-    """Return True if ts is a plausible Unix timestamp (after 2020-01-01)."""
-    MIN_TS = 1_577_836_800  # 2020-01-01T00:00:00Z
-    MAX_TS = 4_102_444_800  # 2100-01-01T00:00:00Z
-    return MIN_TS <= ts <= MAX_TS
+    """Return True if ts is a plausible Unix timestamp (after 2020-01-01).
+
+    Accepts both Unix seconds and Unix milliseconds; millisecond values are
+    normalised before the range check so that ESP32 clients that send
+    milliseconds continue to pass validation.
+    """
+    normalised = normalise_timestamp(ts)
+    return _MIN_TS_S <= normalised <= _MAX_TS_S
 
 
 def validate_scan_event(event: dict) -> tuple[bool, Optional[str]]:

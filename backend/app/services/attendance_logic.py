@@ -24,7 +24,12 @@ logger = logging.getLogger(__name__)
 # Scan event Pydantic schema
 # ---------------------------------------------------------------------------
 from pydantic import BaseModel, field_validator, model_validator
-from ..utils.validators import validate_mac_address, normalise_mac, validate_rssi
+from ..utils.validators import (
+    validate_mac_address,
+    normalise_mac,
+    validate_rssi,
+    normalise_timestamp,
+)
 
 
 class ScanEvent(BaseModel):
@@ -47,6 +52,12 @@ class ScanEvent(BaseModel):
         if not validate_rssi(v):
             raise ValueError(f"RSSI {v} out of valid range")
         return v
+
+    @field_validator("timestamp")
+    @classmethod
+    def normalise_ts(cls, v: int) -> int:
+        """Normalise millisecond timestamps to seconds for backward compat."""
+        return normalise_timestamp(v)
 
     @field_validator("beacon_id")
     @classmethod

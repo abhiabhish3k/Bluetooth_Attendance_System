@@ -100,13 +100,15 @@ the environment, add UUID filtering to the scanner's
 
 ## Data Flow
 
+### Linux C++ scanner (existing)
+
 ```
 Student Phone
   └── beacon_app (Flutter)
         └── BeaconBroadcast.start(uuid, major, minor)
               └── BLE Advertisement (iBeacon, 20 Hz)
 
-Raspberry Pi
+Raspberry Pi / Laptop
   └── BlueZ (bluez daemon)
         └── D-Bus: InterfacesAdded / PropertiesChanged signals
               └── C++ BleScanner
@@ -124,6 +126,29 @@ Python Backend
                     └── Match by MAC address (backward compatible fallback)
                           └── AttendanceORM created → student marked present
 ```
+
+### ESP32 scanner (new)
+
+```
+Student Phone
+  └── beacon_app (Flutter)
+        └── BLE Advertisement (iBeacon)
+
+ESP32 Dev Board
+  └── BLE passive scan (continuous, all channels)
+        └── ScanCallbacks::onResult()
+              └── parseIBeacon() → beacon_id = "<major>:<minor>"
+                    └── local dedup (5 s window per MAC)
+                          └── batch queue (flush every 1 s or 20 events)
+                                └── HTTP POST /api/events/batch
+                                      Body: {"events": [{...}, ...]}
+
+Python Backend
+  └── POST /api/events/batch  (accepts bare array OR {"events":[...]} envelope)
+        └── same attendance_logic.process_scan_event() pipeline as above
+```
+
+End-to-end latency with ESP32: **150–300 ms** (phone → dashboard).
 
 ---
 

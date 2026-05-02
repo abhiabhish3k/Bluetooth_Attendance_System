@@ -49,8 +49,9 @@ Receive a single BLE scan event from the C++ scanner.
 |-------|------|----------|-------------|
 | `address` | string | ✅ | MAC address `XX:XX:XX:XX:XX:XX` |
 | `rssi` | integer | ✅ | Signal strength in dBm (−120 to +10) |
-| `timestamp` | integer | ✅ | Unix timestamp (seconds) |
+| `timestamp` | integer | ✅ | Unix timestamp – **seconds** or milliseconds (auto-detected) |
 | `name` | string | ❌ | Device advertising name |
+| `beacon_id` | string | ❌ | `"<major>:<minor>"` from iBeacon (e.g. `"1:1001"`) |
 
 **Response 200** – event processed
 ```json
@@ -79,7 +80,31 @@ Possible `status` values:
 #### `POST /api/events/batch`
 Receive up to 100 events in a single request.
 
-**Request body**: array of event objects (same schema as above).
+Two body shapes are accepted for backward compatibility:
+
+**Shape 1 – bare array** (Linux C++ scanner, legacy):
+
+```json
+[
+  {"address": "AA:BB:CC:DD:EE:FF", "rssi": -62, "timestamp": 1712345678, "beacon_id": "1:1001"},
+  {"address": "BB:CC:DD:EE:FF:00", "rssi": -70, "timestamp": 1712345679, "beacon_id": "1:1002"}
+]
+```
+
+**Shape 2 – envelope object** (ESP32 scanner):
+
+```json
+{
+  "events": [
+    {"address": "AA:BB:CC:DD:EE:FF", "rssi": -62, "timestamp": 1712345678, "beacon_id": "1:1001"},
+    {"address": "BB:CC:DD:EE:FF:00", "rssi": -70, "timestamp": 1712345679, "beacon_id": "1:1002"}
+  ]
+}
+```
+
+Per-event fields are identical to `POST /api/events`.  The `timestamp` field
+accepts both **Unix seconds** and **Unix milliseconds**; millisecond values
+are normalised to seconds automatically.
 
 **Response 200**
 ```json
@@ -87,6 +112,43 @@ Receive up to 100 events in a single request.
   "processed": 2,
   "results": [...]
 }
+```
+
+#### cURL test commands
+
+**Single event:**
+```bash
+curl -s -X POST http://localhost:8000/api/events \
+  -H "Content-Type: application/json" \
+  -d '{
+    "address":   "AA:BB:CC:DD:EE:FF",
+    "rssi":      -62,
+    "timestamp": 1712345678,
+    "beacon_id": "1:1001",
+    "name":      "Test Phone"
+  }' | python3 -m json.tool
+```
+
+**Batch – ESP32 envelope format:**
+```bash
+curl -s -X POST http://localhost:8000/api/events/batch \
+  -H "Content-Type: application/json" \
+  -d '{
+    "events": [
+      {"address":"AA:BB:CC:DD:EE:FF","rssi":-62,"timestamp":1712345678,"beacon_id":"1:1001"},
+      {"address":"BB:CC:DD:EE:FF:00","rssi":-70,"timestamp":1712345679,"beacon_id":"1:1002"}
+    ]
+  }' | python3 -m json.tool
+```
+
+**Batch – bare array (Linux scanner, legacy):**
+```bash
+curl -s -X POST http://localhost:8000/api/events/batch \
+  -H "Content-Type: application/json" \
+  -d '[
+    {"address":"AA:BB:CC:DD:EE:FF","rssi":-62,"timestamp":1712345678,"beacon_id":"1:1001"},
+    {"address":"BB:CC:DD:EE:FF:00","rssi":-70,"timestamp":1712345679,"beacon_id":"1:1002"}
+  ]' | python3 -m json.tool
 ```
 
 ---

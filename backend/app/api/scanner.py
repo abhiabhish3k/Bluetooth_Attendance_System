@@ -3,10 +3,21 @@ Scanner event API endpoints.
 
 Receives JSON events emitted by the C++ BLE scanner and processes them
 through the attendance logic pipeline.
+
+Batch endpoint (`POST /api/events/batch`) accepts two body shapes:
+
+  • Bare array (Linux C++ scanner, legacy format):
+      [{"address": "...", ...}, ...]
+
+  • Envelope object (ESP32 scanner format):
+      {"events": [{"address": "...", ...}, ...]}
+
+Both shapes carry the same per-event schema (address, rssi, timestamp,
+name?, beacon_id?).
 """
 
 import logging
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..services.attendance_logic import ScanEvent, process_scan_event
@@ -59,13 +70,43 @@ async def receive_scan_event(
 @router.post(
     "/batch",
     summary="Receive a batch of BLE scan events",
-    description="Accepts an array of scan events. Each event is processed independently.",
+    description=(
+        "Accepts up to 100 scan events in a single request.\n\n"
+        "Two body shapes are supported for backward compatibility:\n\n"
+        "• **Bare array** (Linux C++ scanner): `[{...}, ...]`\n\n"
+        "• **Envelope object** (ESP32 scanner): `{\"events\": [{...}, ...]}`\n\n"
+        "Each event uses the same schema as `POST /api/events`."
+    ),
     status_code=status.HTTP_200_OK,
 )
 async def receive_batch_events(
-    payloads: list[dict],
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Request body must be valid JSON",
+        )
+
+    # Accept both bare array [...] (Linux scanner) and {"events":[...]} (ESP32)
+    if isinstance(body, list):
+        payloads = body
+    elif isinstance(body, dict) and "events" in body:
+        payloads = body["events"]
+        if not isinstance(payloads, list):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail='"events" must be an array',
+            )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Expected a JSON array or an object with an "events" array',
+        )
+
     if len(payloads) > 100:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
