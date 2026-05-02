@@ -16,6 +16,7 @@ Both shapes carry the same per-event schema (address, rssi, timestamp,
 name?, beacon_id?).
 """
 
+import asyncio
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..services.attendance_logic import ScanEvent, process_scan_event
 from ..services.scanner_control import scanner_service
 from ..utils.validators import validate_scan_event
+from ..core.ws_manager import ws_manager
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +66,17 @@ async def receive_scan_event(
 
     result = await process_scan_event(event, db)
     scanner_service.update_last_event()
+
+    # Broadcast raw scan event to any subscribed dashboard clients
+    asyncio.ensure_future(ws_manager.broadcast("scan", {
+        "type": "scan",
+        "address": event.address,
+        "rssi": event.rssi,
+        "beacon_id": event.beacon_id,
+        "timestamp": event.timestamp,
+        "scanner_id": event.scanner_id,
+    }))
+
     return result
 
 
@@ -114,6 +127,7 @@ async def receive_batch_events(
         )
 
     results = []
+    scan_broadcasts = []
     for payload in payloads:
         ok, err = validate_scan_event(payload)
         if not ok:
@@ -123,9 +137,22 @@ async def receive_batch_events(
             event = ScanEvent(**payload)
             result = await process_scan_event(event, db)
             results.append(result)
+            # Collect raw scan event for WebSocket broadcast
+            scan_broadcasts.append({
+                "type": "scan",
+                "address": event.address,
+                "rssi": event.rssi,
+                "beacon_id": event.beacon_id,
+                "timestamp": event.timestamp,
+                "scanner_id": event.scanner_id,
+            })
         except Exception as exc:
             logger.warning("Error processing event %s: %s", payload, exc)
             results.append({"status": "error", "reason": "processing_failed"})
 
     scanner_service.update_last_event()
+
+    # Broadcast raw scan events (fire-and-forget; don't block the response)
+    for msg in scan_broadcasts:
+        asyncio.ensure_future(ws_manager.broadcast("scan", msg))
     return {"processed": len(results), "results": results}

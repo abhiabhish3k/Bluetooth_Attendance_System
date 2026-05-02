@@ -113,6 +113,7 @@ from .api.attendance import router as attendance_router
 from .api.students import router as students_router
 from .api.sessions import router as sessions_router
 from .api.health import router as health_router
+from .api.websocket import router as websocket_router
 
 app.include_router(scanner_router)
 app.include_router(scanner_control_router)
@@ -120,6 +121,7 @@ app.include_router(attendance_router)
 app.include_router(students_router)
 app.include_router(sessions_router)
 app.include_router(health_router)
+app.include_router(websocket_router)
 
 
 # ---------------------------------------------------------------------------
