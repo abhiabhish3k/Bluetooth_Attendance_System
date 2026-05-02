@@ -117,6 +117,14 @@ async def process_scan_event(event: ScanEvent, db: AsyncSession) -> dict:
     """
     detected_time = datetime.fromtimestamp(event.timestamp, tz=timezone.utc)
 
+    logger.debug(
+        "Processing scan event: addr=%s rssi=%d beacon_id=%s ts=%s",
+        event.address,
+        event.rssi,
+        event.beacon_id or "none",
+        detected_time.isoformat(),
+    )
+
     # ------------------------------------------------------------------
     # Step 1: Find active session
     # ------------------------------------------------------------------
@@ -139,6 +147,10 @@ async def process_scan_event(event: ScanEvent, db: AsyncSession) -> dict:
 
     if session is None:
         await db.commit()
+        logger.info(
+            "Scan ignored – no active session (addr=%s rssi=%d beacon_id=%s)",
+            event.address, event.rssi, event.beacon_id or "none",
+        )
         return {"status": "logged", "reason": "no_active_session", "mac": event.address}
 
     # ------------------------------------------------------------------
@@ -147,6 +159,10 @@ async def process_scan_event(event: ScanEvent, db: AsyncSession) -> dict:
     rssi_threshold = session.threshold_rssi or settings.rssi_attendance_threshold
     if event.rssi < rssi_threshold:
         await db.commit()
+        logger.info(
+            "Scan ignored – RSSI too low: addr=%s rssi=%d threshold=%d session=%s",
+            event.address, event.rssi, rssi_threshold, session.session_id,
+        )
         return {
             "status": "ignored",
             "reason": "rssi_below_threshold",
@@ -168,6 +184,10 @@ async def process_scan_event(event: ScanEvent, db: AsyncSession) -> dict:
         student = result.scalar_one_or_none()
 
         if student is not None:
+            logger.debug(
+                "Student matched by unique_id: student_id=%s beacon_id=%s",
+                student.id, event.beacon_id,
+            )
             # Update last_seen in the student_beacon table if a row exists
             beacon_result = await db.execute(
                 select(StudentBeaconORM).where(
@@ -195,6 +215,10 @@ async def process_scan_event(event: ScanEvent, db: AsyncSession) -> dict:
 
                 # Update last_seen on the beacon row
                 if student is not None:
+                    logger.debug(
+                        "Student matched by beacon_data mapping: student_id=%s beacon_id=%s",
+                        student.id, event.beacon_id,
+                    )
                     beacon_row.last_seen = detected_time
                     db.add(beacon_row)
 
@@ -204,9 +228,18 @@ async def process_scan_event(event: ScanEvent, db: AsyncSession) -> dict:
             select(StudentORM).where(StudentORM.mac_address == event.address)
         )
         student = result.scalar_one_or_none()
+        if student is not None:
+            logger.debug(
+                "Student matched by MAC address: student_id=%s addr=%s",
+                student.id, event.address,
+            )
 
     if student is None:
         await db.commit()
+        logger.info(
+            "Scan ignored – unknown device: addr=%s beacon_id=%s session=%s",
+            event.address, event.beacon_id or "none", session.session_id,
+        )
         return {
             "status": "ignored",
             "reason": "unknown_device",
@@ -227,24 +260,37 @@ async def process_scan_event(event: ScanEvent, db: AsyncSession) -> dict:
     )
     if existing.scalar_one_or_none() is not None:
         await db.commit()
+        logger.debug(
+            "Attendance already marked: student_id=%s session=%s",
+            student.id, session.session_id,
+        )
         return {
             "status": "already_marked",
             "student_id": student.id,
             "session_id": session.session_id,
         }
 
-    attendance = AttendanceORM(
-        student_id=student.id,
-        session_id=session.session_id,
-        detected_time=detected_time,
-        rssi=event.rssi,
-    )
-    db.add(attendance)
-    await db.commit()
+    try:
+        attendance = AttendanceORM(
+            student_id=student.id,
+            session_id=session.session_id,
+            detected_time=detected_time,
+            rssi=event.rssi,
+        )
+        db.add(attendance)
+        await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        logger.error(
+            "Failed to record attendance for student_id=%s session=%s: %s",
+            student.id, session.session_id, exc,
+        )
+        raise
 
     logger.info(
-        "Attendance marked: student=%s session=%s rssi=%d beacon=%s",
-        student.id, session.session_id, event.rssi, event.beacon_id or "MAC",
+        "Attendance marked: student=%s (%s) session=%s rssi=%d matched_by=%s",
+        student.id, student.name, session.session_id, event.rssi,
+        "beacon" if event.beacon_id else "mac",
     )
     return {
         "status": "marked",
@@ -313,11 +359,24 @@ async def _find_active_session(db: AsyncSession) -> Optional[SessionORM]:
                     "Using manually cached active session: %s", active_id
                 )
                 return session
+            # Log why the cached session is rejected
+            if start > now:
+                logger.info(
+                    "Cached session %s not yet started (start=%s now=%s); clearing cache",
+                    active_id, start.isoformat(), now.isoformat(),
+                )
+            else:
+                logger.info(
+                    "Cached session %s has ended (end=%s now=%s); clearing cache",
+                    active_id,
+                    end.isoformat() if end else "None",
+                    now.isoformat(),
+                )
+        else:
+            logger.info(
+                "Cached session %s not found in database; clearing cache", active_id
+            )
         # Cached session is missing or no longer open – clear it
-        logger.info(
-            "Cached session %s is no longer valid; clearing cache",
-            active_id,
-        )
         set_active_session(None)
 
     # ------------------------------------------------------------------
@@ -336,7 +395,14 @@ async def _find_active_session(db: AsyncSession) -> Optional[SessionORM]:
     )
     session = result.scalar_one_or_none()
     if session is not None:
-        logger.debug("Auto-detected active session: %s", session.session_id)
+        logger.info(
+            "Auto-detected active session: id=%s class=%s start=%s",
+            session.session_id,
+            session.class_name,
+            session.start_time.isoformat(),
+        )
+    else:
+        logger.debug("No active session found (now=%s)", now.isoformat())
     return session
 
 

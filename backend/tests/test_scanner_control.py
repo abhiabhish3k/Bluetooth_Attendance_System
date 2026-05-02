@@ -251,3 +251,43 @@ async def test_last_event_at_updated_on_scan_event(client):
     # We only assert it if the request was processed (200)
     if response.status_code == 200:
         assert status_res.json()["last_event_at"] is not None
+
+
+# ---------------------------------------------------------------------------
+# New fields in status response (last_exit_code, metrics)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio
+async def test_scanner_status_new_fields(client):
+    """Status response includes last_exit_code and metrics fields."""
+    response = await client.get("/api/scanner/status")
+    assert response.status_code == 200
+    data = response.json()
+    assert "last_exit_code" in data
+    assert "metrics" in data
+    metrics = data["metrics"]
+    assert "events_received" in metrics
+    assert "events_forwarded" in metrics
+    assert "events_failed" in metrics
+
+
+# ---------------------------------------------------------------------------
+# GET /api/health/diagnostics
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio
+async def test_health_diagnostics_endpoint(client):
+    """Diagnostics endpoint returns a well-structured response."""
+    response = await client.get("/api/health/diagnostics")
+    assert response.status_code == 200
+    data = response.json()
+    assert "overall_ok" in data
+    assert "bluetooth_adapters" in data
+    assert "dbus" in data
+    assert "bluetooth_service" in data
+    assert "scanner_binary" in data
+    assert "settings" in data
+    assert "scanner" in data
+    assert "config_warnings" in data
+    # scanner sub-dict should have the standard status shape
+    assert "running" in data["scanner"]

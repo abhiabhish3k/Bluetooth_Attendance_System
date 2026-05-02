@@ -44,6 +44,14 @@ async_session_maker = async_sessionmaker(
 # ---------------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Startup: log configuration and validate environment
+    settings.log_startup_config()
+    warnings = settings.validate_startup()
+    for w in warnings:
+        logger.warning("Startup check: %s", w)
+    if not warnings:
+        logger.info("Startup check: all configuration checks passed")
+
     # Startup: create all tables
     async with engine.begin() as conn:
         await conn.run_sync(StudentBase.metadata.create_all)
@@ -84,16 +92,18 @@ from .api.scanner_control import router as scanner_control_router
 from .api.attendance import router as attendance_router
 from .api.students import router as students_router
 from .api.sessions import router as sessions_router
+from .api.health import router as health_router
 
 app.include_router(scanner_router)
 app.include_router(scanner_control_router)
 app.include_router(attendance_router)
 app.include_router(students_router)
 app.include_router(sessions_router)
+app.include_router(health_router)
 
 
 # ---------------------------------------------------------------------------
-# Health check
+# Health check (lightweight)
 # ---------------------------------------------------------------------------
 @app.get("/health", tags=["system"])
 async def health_check():
@@ -110,4 +120,5 @@ async def root():
         "message": "BLE Attendance System API",
         "docs": "/docs",
         "health": "/health",
+        "diagnostics": "/api/health/diagnostics",
     }
