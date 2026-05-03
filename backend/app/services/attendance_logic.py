@@ -318,7 +318,7 @@ async def process_scan_event(event: ScanEvent, db: AsyncSession) -> dict:
     try:
         import asyncio
         from ..core.ws_manager import ws_manager
-        asyncio.ensure_future(ws_manager.broadcast("attendance", {
+        asyncio.create_task(ws_manager.broadcast("attendance", {
             "type": "attendance_marked",
             "student_id": student.id,
             "student_name": student.name,

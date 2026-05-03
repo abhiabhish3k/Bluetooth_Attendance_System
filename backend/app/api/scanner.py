@@ -68,7 +68,7 @@ async def receive_scan_event(
     scanner_service.update_last_event()
 
     # Broadcast raw scan event to any subscribed dashboard clients
-    asyncio.ensure_future(ws_manager.broadcast("scan", {
+    asyncio.create_task(ws_manager.broadcast("scan", {
         "type": "scan",
         "address": event.address,
         "rssi": event.rssi,
@@ -154,5 +154,5 @@ async def receive_batch_events(
 
     # Broadcast raw scan events (fire-and-forget; don't block the response)
     for msg in scan_broadcasts:
-        asyncio.ensure_future(ws_manager.broadcast("scan", msg))
+        asyncio.create_task(ws_manager.broadcast("scan", msg))
     return {"processed": len(results), "results": results}

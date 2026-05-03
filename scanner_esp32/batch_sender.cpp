@@ -155,9 +155,10 @@ bool BatchSender::_postWithRetry(const String& payload) {
         }
 
         if (attempt < HTTP_RETRY_COUNT) {
-            // Exponential backoff: 500 ms, 1000 ms, 2000 ms, ...
-            unsigned long backoff = (unsigned long)HTTP_RETRY_BASE_MS
-                                    * (1UL << (attempt - 1));
+            // Exponential backoff: 500 ms, 1000 ms, 2000 ms, …
+            // Cap the shift to prevent overflow if HTTP_RETRY_COUNT is raised.
+            int shift = (attempt - 1 < 6) ? (attempt - 1) : 6;
+            unsigned long backoff = (unsigned long)HTTP_RETRY_BASE_MS * (1UL << shift);
             LOG_DEBUG("Retry backoff: %lu ms", backoff);
             delay(backoff);
         }
