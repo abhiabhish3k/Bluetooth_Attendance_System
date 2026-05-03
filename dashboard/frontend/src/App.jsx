@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -158,6 +158,15 @@ export default function App() {
   const [scannerStatus, setScannerStatus] = useState(null);
   const [scannerLoading, setScannerLoading] = useState(false);
 
+  // Live / WebSocket state
+  const WS_BASE = API_BASE.replace(/^http/, "ws");
+  const [liveEnabled, setLiveEnabled] = useState(false);
+  const [wsStatus, setWsStatus] = useState("disconnected");
+  const [liveScanEvents, setLiveScanEvents] = useState([]);
+  const [liveAttendanceEvents, setLiveAttendanceEvents] = useState([]);
+  const scanWsRef = useRef(null);
+  const attendanceWsRef = useRef(null);
+
   const flashStyle = useMemo(() => {
     if (flash.type === "error") return { background: "#fee2e2", border: "1px solid #fca5a5" };
     if (flash.type === "success") return { background: "#dcfce7", border: "1px solid #86efac" };
@@ -264,6 +273,54 @@ export default function App() {
     const interval = setInterval(loadScannerStatus, 7000);
     return () => clearInterval(interval);
   }, [loadScannerStatus]);
+
+  // Live WebSocket connections – connect/disconnect based on liveEnabled toggle
+  useEffect(() => {
+    if (!liveEnabled) {
+      scanWsRef.current?.close();
+      attendanceWsRef.current?.close();
+      setWsStatus("disconnected");
+      return;
+    }
+
+    setWsStatus("connecting");
+
+    // Scan stream WebSocket
+    const scanWs = new WebSocket(`${WS_BASE}/ws/scan`);
+    scanWs.onopen = () => setWsStatus("connected");
+    scanWs.onclose = () => setWsStatus("disconnected");
+    scanWs.onerror = () => setWsStatus("error");
+    scanWs.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === "scan") {
+          setLiveScanEvents((prev) => [msg, ...prev].slice(0, 25));
+        }
+      } catch (_) {}
+    };
+    scanWsRef.current = scanWs;
+
+    // Attendance stream WebSocket
+    const attWs = new WebSocket(`${WS_BASE}/ws/attendance`);
+    attWs.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === "attendance_marked") {
+          setLiveAttendanceEvents((prev) => [msg, ...prev].slice(0, 25));
+          // Refresh attendance list and report so the main tables update too
+          loadAttendanceList();
+          if (selectedSessionId) loadReport(selectedSessionId);
+        }
+      } catch (_) {}
+    };
+    attendanceWsRef.current = attWs;
+
+    return () => {
+      scanWs.close();
+      attWs.close();
+      setWsStatus("disconnected");
+    };
+  }, [liveEnabled, WS_BASE, loadAttendanceList, loadReport, selectedSessionId]);
 
   useEffect(() => {
     if (selectedStudent) {
@@ -618,6 +675,138 @@ export default function App() {
             )}
           </div>
         </section> */}
+
+        {/* ── Live Panel ─────────────────────────────────────────────────── */}
+        <section style={section}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <h2 style={{ margin: 0 }}>Live</h2>
+            <button
+              style={{
+                ...btn,
+                background: liveEnabled ? "#dcfce7" : "#f8fafc",
+                borderColor: liveEnabled ? "#86efac" : "#94a3b8",
+                fontWeight: 700,
+              }}
+              onClick={() => {
+                setLiveEnabled((v) => !v);
+                if (liveEnabled) {
+                  setLiveScanEvents([]);
+                  setLiveAttendanceEvents([]);
+                }
+              }}
+            >
+              {liveEnabled ? "■ Stop" : "▶ Go Live"}
+            </button>
+            {liveEnabled && (
+              <span
+                style={{
+                  background: wsStatus === "connected" ? "#16a34a" : wsStatus === "connecting" ? "#d97706" : "#dc2626",
+                  color: "#fff",
+                  padding: "2px 10px",
+                  borderRadius: 999,
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}
+              >
+                {wsStatus}
+              </span>
+            )}
+            <span style={{ color: "#94a3b8", fontSize: 12 }}>
+              Real-time scan stream and attendance updates via WebSocket.
+            </span>
+          </div>
+
+          {liveEnabled && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 12 }}>
+              {/* Scan stream */}
+              <div>
+                <h3 style={{ margin: "0 0 6px", fontSize: 14 }}>
+                  Scan Stream{" "}
+                  <span style={{ color: "#94a3b8", fontWeight: 400 }}>
+                    (last {liveScanEvents.length})
+                  </span>
+                </h3>
+                <div style={{ maxHeight: 220, overflow: "auto", border: "1px solid #e2e8f0", borderRadius: 8 }}>
+                  {liveScanEvents.length === 0 ? (
+                    <p style={{ padding: 10, color: "#94a3b8", margin: 0, fontSize: 13 }}>
+                      Waiting for scan events…
+                    </p>
+                  ) : (
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                      <thead>
+                        <tr style={{ background: "#f1f5f9" }}>
+                          <th style={{ padding: "5px 8px", textAlign: "left" }}>Beacon ID</th>
+                          <th style={{ padding: "5px 8px", textAlign: "left" }}>RSSI</th>
+                          <th style={{ padding: "5px 8px", textAlign: "left" }}>Scanner</th>
+                          <th style={{ padding: "5px 8px", textAlign: "left" }}>MAC</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {liveScanEvents.map((ev, i) => (
+                          <tr key={i} style={{ background: i === 0 ? "#f0fdf4" : "transparent" }}>
+                            <td style={{ padding: "4px 8px", borderTop: "1px solid #f1f5f9", fontFamily: "monospace" }}>
+                              {ev.beacon_id || "-"}
+                            </td>
+                            <td style={{ padding: "4px 8px", borderTop: "1px solid #f1f5f9" }}>{ev.rssi}</td>
+                            <td style={{ padding: "4px 8px", borderTop: "1px solid #f1f5f9", color: "#64748b" }}>
+                              {ev.scanner_id || "-"}
+                            </td>
+                            <td style={{ padding: "4px 8px", borderTop: "1px solid #f1f5f9", color: "#94a3b8", fontFamily: "monospace", fontSize: 11 }}>
+                              {ev.address}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
+
+              {/* Attendance stream */}
+              <div>
+                <h3 style={{ margin: "0 0 6px", fontSize: 14 }}>
+                  Attendance Updates{" "}
+                  <span style={{ color: "#94a3b8", fontWeight: 400 }}>
+                    (last {liveAttendanceEvents.length})
+                  </span>
+                </h3>
+                <div style={{ maxHeight: 220, overflow: "auto", border: "1px solid #e2e8f0", borderRadius: 8 }}>
+                  {liveAttendanceEvents.length === 0 ? (
+                    <p style={{ padding: 10, color: "#94a3b8", margin: 0, fontSize: 13 }}>
+                      Waiting for attendance marks…
+                    </p>
+                  ) : (
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                      <thead>
+                        <tr style={{ background: "#f1f5f9" }}>
+                          <th style={{ padding: "5px 8px", textAlign: "left" }}>Student</th>
+                          <th style={{ padding: "5px 8px", textAlign: "left" }}>Session</th>
+                          <th style={{ padding: "5px 8px", textAlign: "left" }}>RSSI</th>
+                          <th style={{ padding: "5px 8px", textAlign: "left" }}>Via</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {liveAttendanceEvents.map((ev, i) => (
+                          <tr key={i} style={{ background: i === 0 ? "#f0fdf4" : "transparent" }}>
+                            <td style={{ padding: "4px 8px", borderTop: "1px solid #f1f5f9", fontWeight: 600 }}>
+                              {ev.student_name}{" "}
+                              <span style={{ color: "#94a3b8", fontWeight: 400 }}>#{ev.student_id}</span>
+                            </td>
+                            <td style={{ padding: "4px 8px", borderTop: "1px solid #f1f5f9" }}>#{ev.session_id}</td>
+                            <td style={{ padding: "4px 8px", borderTop: "1px solid #f1f5f9" }}>{ev.rssi}</td>
+                            <td style={{ padding: "4px 8px", borderTop: "1px solid #f1f5f9", color: "#64748b" }}>
+                              {ev.matched_by}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </section>
 
         <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 14 }}>
           <section style={section}>

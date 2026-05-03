@@ -38,6 +38,7 @@ class ScanEvent(BaseModel):
     timestamp: int
     name: str = ""
     beacon_id: Optional[str] = None
+    scanner_id: Optional[str] = None
 
     @field_validator("address")
     @classmethod
@@ -298,19 +299,38 @@ async def process_scan_event(event: ScanEvent, db: AsyncSession) -> dict:
         )
         raise
 
+    matched_by = "beacon" if event.beacon_id else "mac"
     logger.info(
         "Attendance marked: student=%s (%s) session=%s rssi=%d matched_by=%s",
-        student.id, student.name, session.session_id, event.rssi,
-        "beacon" if event.beacon_id else "mac",
+        student.id, student.name, session.session_id, event.rssi, matched_by,
     )
-    return {
+
+    result = {
         "status": "marked",
         "student_id": student.id,
         "student_name": student.name,
         "session_id": session.session_id,
         "rssi": event.rssi,
-        "matched_by": "beacon" if event.beacon_id else "mac",
+        "matched_by": matched_by,
     }
+
+    # Broadcast attendance update to all connected dashboard WebSocket clients
+    try:
+        import asyncio
+        from ..core.ws_manager import ws_manager
+        asyncio.create_task(ws_manager.broadcast("attendance", {
+            "type": "attendance_marked",
+            "student_id": student.id,
+            "student_name": student.name,
+            "session_id": session.session_id,
+            "rssi": event.rssi,
+            "matched_by": matched_by,
+            "timestamp": event.timestamp,
+        }))
+    except Exception as _exc:
+        logger.debug("WS broadcast skipped: %s", _exc)
+
+    return result
 
 
 # ---------------------------------------------------------------------------

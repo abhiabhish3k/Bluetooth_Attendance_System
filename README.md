@@ -20,25 +20,34 @@ the beacon app.
 │  BLE iBeacon: UUID / Major / Minor (= student beacon ID)       │
 └──────────────────────────┬─────────────────────────────────────┘
                            │ BLE radio
-                           ▼
-┌────────────────────────────────────────────────────────────────┐
-│              C++ Scanner (BlueZ D-Bus, Linux)                  │
-│  Parses ManufacturerData → extracts beacon_id                  │
-│  JSON: {"address":"AA:BB:...","rssi":-62,"timestamp":...,      │
-│         "beacon_id":"1:1001"}                                   │
-└──────────────────────────┬─────────────────────────────────────┘
-                           │ HTTP POST /api/events
+                     ┌─────┴──────┐
+                     │            │
+           ┌─────────▼──────┐  ┌──▼────────────────────────────┐
+           │  C++ Scanner   │  │  ESP32 Scanner (EEPEX)         │
+           │  BlueZ D-Bus   │  │  Arduino BLE GAP callbacks     │
+           │  Linux / RPi   │  │  Wi-Fi HTTP POST               │
+           └─────────┬──────┘  └──┬────────────────────────────┘
+                     │            │
+                     └─────┬──────┘
+                           │ HTTP POST /api/events[/batch]
                            ▼
 ┌────────────────────────────────────────────────────────────────┐
 │              Python FastAPI Backend                            │
 │  Matches beacon_id → student.unique_id                         │
 │  Falls back to MAC address if no beacon data                   │
+│  WebSocket broadcast → /ws/scan  /ws/attendance                │
 └──────────────────────────┬─────────────────────────────────────┘
                            │
                            ▼
 ┌────────────────────────────────────────────────────────────────┐
 │                     SQLite Database                            │
 │  students · sessions · attendance · scan_logs · student_beacon │
+└────────────────────────────────────────────────────────────────┘
+                           │ WebSocket
+                           ▼
+┌────────────────────────────────────────────────────────────────┐
+│              React Dashboard (Live panel)                      │
+│  Real-time scan stream + attendance updates via WebSocket       │
 └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -60,7 +69,7 @@ bluetooth-attendance-system/
 │   │   └── services/beacon_service.dart
 │   ├── android/              # Android manifest + permissions
 │   └── ios/                  # iOS Info.plist + background modes
-├── scanner/                  # C++ BLE scanner (BlueZ D-Bus)
+├── scanner/                  # C++ BLE scanner (BlueZ D-Bus, Linux/RPi)
 │   ├── CMakeLists.txt
 │   ├── config.json
 │   ├── include/              # Header files
@@ -74,12 +83,21 @@ bluetooth-attendance-system/
 │       ├── device_parser.cpp
 │       ├── deduplicator.cpp
 │       └── logger.cpp
+├── scanner_esp32/            # ESP32 BLE scanner (Arduino, EEPEX hardware)
+│   ├── scanner_esp32.ino     # Main entry point (setup/loop, LED, Wi-Fi reconnect)
+│   ├── config.h              # All compile-time settings — edit before flashing
+│   ├── logger.h              # Serial log-level macros
+│   ├── ibeacon.h / .cpp      # Apple iBeacon parser
+│   ├── dedup.h / .cpp        # Time-window deduplicator
+│   ├── batch_sender.h / .cpp # HTTP batch POST (retry, backoff, offline buffer)
+│   └── README.md             # Flashing guide + BlueZ vs ESP32 explanation
 ├── backend/                  # Python FastAPI backend
 │   ├── requirements.txt
 │   └── app/
 │       ├── main.py
 │       ├── config.py
-│       ├── api/              # REST endpoints
+│       ├── api/              # REST + WebSocket endpoints
+│       ├── core/             # ws_manager.py (WebSocket connection manager)
 │       ├── models/           # SQLAlchemy + Pydantic models
 │       ├── services/         # Business logic
 │       └── utils/            # Validators, helpers
@@ -318,7 +336,7 @@ is called.  If the binary is not found, the endpoint returns `503 Service Unavai
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/api/events` | Receive a BLE scan event |
-| `POST` | `/api/events/batch` | Receive multiple events |
+| `POST` | `/api/events/batch` | Receive multiple events (ESP32 or Linux scanner) |
 | `GET`  | `/api/scanner/status` | Get scanner engine runtime status |
 | `POST` | `/api/scanner/start` | Start the C++ scanner engine |
 | `POST` | `/api/scanner/stop` | Stop the C++ scanner engine |
@@ -338,9 +356,101 @@ is called.  If the binary is not found, the endpoint returns `503 Service Unavai
 | `GET`  | `/api/attendance` | List attendance records |
 | `DELETE`| `/api/attendance/{id}` | Delete an attendance record |
 | `GET`  | `/api/attendance/report/{id}` | Get attendance report for a session |
+| `WS`   | `/ws/scan` | WebSocket: real-time raw scan events |
+| `WS`   | `/ws/attendance` | WebSocket: real-time attendance marks |
 | `GET`  | `/health` | Health check |
 
 Full documentation: [docs/API.md](docs/API.md)
+
+---
+
+## ESP32 Scanner (EEPEX)
+
+For hardware exhibitions (such as EEPEX) the Linux C++ scanner can be replaced by
+an **ESP32 dev-board** flashed with the Arduino sketch in `scanner_esp32/`.
+
+The ESP32 scanner offers:
+- **No Linux dependency** — runs on any ESP32 board with Wi-Fi
+- **Faster event delivery** — BLE GAP callbacks with no D-Bus overhead
+- **Offline buffering** — continues scanning and queues events when Wi-Fi is down
+- **Automatic startup** — `setup()` / `loop()` run on power-on, no manual start needed
+- **Real-time dashboard** — backend broadcasts events via WebSocket; the dashboard
+  Live panel shows scans and attendance marks as they happen
+
+See [scanner_esp32/README.md](scanner_esp32/README.md) for:
+- Full project structure (multi-file Arduino sketch)
+- How ESP32 GAP callbacks replace BlueZ D-Bus signals
+- Flashing instructions and expected serial output
+- LED blink patterns and robustness features
+
+### Example payloads
+
+**Single event** (`POST /api/events`):
+
+```json
+{
+  "address":    "AA:BB:CC:DD:EE:FF",
+  "rssi":       -62,
+  "timestamp":  1712345678,
+  "beacon_id":  "1:1001",
+  "scanner_id": "esp32-main"
+}
+```
+
+**Batch — ESP32 envelope** (`POST /api/events/batch`):
+
+```json
+{
+  "events": [
+    {
+      "address":    "AA:BB:CC:DD:EE:FF",
+      "rssi":       -62,
+      "timestamp":  1712345678,
+      "beacon_id":  "1:1001",
+      "scanner_id": "esp32-main"
+    }
+  ]
+}
+```
+
+**Batch — bare array** (legacy Linux scanner format, also accepted):
+
+```json
+[
+  {"address":"AA:BB:CC:DD:EE:FF","rssi":-62,"timestamp":1712345678,"beacon_id":"1:1001"}
+]
+```
+
+### WebSocket message formats
+
+**Raw scan event** (`ws://<host>:8000/ws/scan`):
+
+```json
+{
+  "type":       "scan",
+  "address":    "AA:BB:CC:DD:EE:FF",
+  "rssi":       -62,
+  "beacon_id":  "1:1001",
+  "timestamp":  1712345678,
+  "scanner_id": "esp32-main"
+}
+```
+
+**Attendance marked** (`ws://<host>:8000/ws/attendance`):
+
+```json
+{
+  "type":         "attendance_marked",
+  "student_id":   7,
+  "student_name": "Alice",
+  "session_id":   3,
+  "rssi":         -62,
+  "matched_by":   "beacon",
+  "timestamp":    1712345678
+}
+```
+
+Messages with `"type": "ping"` are keepalive frames and should be ignored.
 
 ---
 
